@@ -4,7 +4,6 @@ Each combination is executed inside a subprocess (for timeout/isolation),
 wrapped by memray.Tracker. Results are collected and saved as Parquet.
 """
 
-import json
 import multiprocessing
 import subprocess
 import sys
@@ -12,7 +11,6 @@ import time
 import traceback
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import psutil
 from shapely.geometry import shape, box as shapely_box
@@ -20,9 +18,7 @@ from shapely.geometry import shape, box as shapely_box
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import (  # noqa: E402
     BENCHMARK_COMBOS,
-    BBOX_SIZE_DEG,
     COG_PATH,
-    DATA_DIR,
     FLAT_PARQUET_PATH,
     FORMAT_PATHS,
     FORMAT_LABELS,
@@ -32,7 +28,6 @@ from config import (  # noqa: E402
     MEMRAY_DIR,
     NUM_RUNS,
     RESULTS_DIR,
-    REGION_BOUNDS,
     S2_LEVEL,
     S2_PARQUET_PATH,
     SAMPLE_POLYGON_GEOJSON,
@@ -336,9 +331,9 @@ def _query_parquet(format_key: str, tool_key: str, query_type: str) -> None:
                 cell_ids = [int(_h3_cell_for_point(lon, lat)) for lon, lat in pts]
                 result = df.filter(pl.col("h3_cell").is_in(cell_ids)).collect()
             else:
-                lons, lats = zip(*pts)
+                pairs = [{"x": lon, "y": lat} for lon, lat in pts]
                 result = df.filter(
-                    pl.col("x").is_in(list(lons)) & pl.col("y").is_in(list(lats))
+                    pl.struct(["x", "y"]).is_in(pairs)
                 ).collect()
             _ = result
         elif query_type == "bbox":
@@ -382,9 +377,12 @@ def _query_parquet(format_key: str, tool_key: str, query_type: str) -> None:
                 cell_ids = [int(_h3_cell_for_point(lon, lat)) for lon, lat in pts]
                 df = pd.read_parquet(path, filters=[("h3_cell", "in", cell_ids)])
             else:
-                lons, lats = zip(*pts)
+                pt_set = set(pts)
                 df = pd.read_parquet(path)
-                df = df[df["x"].isin(lons) & df["y"].isin(lats)]
+                mask = df.apply(
+                    lambda row: (row["x"], row["y"]) in pt_set, axis=1
+                )
+                df = df[mask]
             _ = df
         elif query_type == "bbox":
             bbox = QUERY_BBOXES[0]
@@ -491,7 +489,8 @@ def _query_geoparquet(tool_key: str, query_type: str) -> None:
 def _execute_benchmark(format_key: str, tool_key: str, query_type: str) -> dict:
     """Dispatch to the correct query function, measure wall-clock time and RSS.
 
-    Returns a result dict consumed by the parent process.
+    RSS is captured as a single post-query snapshot (not a peak), stored as
+    ``final_rss_mb``.
     """
     process = psutil.Process()
     t0 = time.perf_counter()
@@ -506,7 +505,7 @@ def _execute_benchmark(format_key: str, tool_key: str, query_type: str) -> dict:
         raise ValueError(f"Unknown format_key: {format_key}")
 
     duration_ms = (time.perf_counter() - t0) * 1000
-    peak_memory_mb = process.memory_info().rss / (1024 * 1024)
+    final_rss_mb = process.memory_info().rss / (1024 * 1024)
 
     return {
         "format": format_key,
@@ -515,7 +514,7 @@ def _execute_benchmark(format_key: str, tool_key: str, query_type: str) -> dict:
         "tool_label": TOOL_LABELS.get(tool_key, tool_key),
         "query_type": query_type,
         "duration_ms": round(duration_ms, 2),
-        "peak_memory_mb": round(peak_memory_mb, 2),
+        "final_rss_mb": round(final_rss_mb, 2),
         "filesize_mb": _filesize_mb(format_key),
     }
 
@@ -589,7 +588,7 @@ def _run_with_memray(
             "tool_label": TOOL_LABELS.get(tool_key, tool_key),
             "query_type": query_type,
             "duration_ms": None,
-            "peak_memory_mb": None,
+            "final_rss_mb": None,
             "filesize_mb": _filesize_mb(format_key),
             "run": run_index,
         }
@@ -605,7 +604,7 @@ def _run_with_memray(
             "tool_label": TOOL_LABELS.get(tool_key, tool_key),
             "query_type": query_type,
             "duration_ms": None,
-            "peak_memory_mb": None,
+            "final_rss_mb": None,
             "filesize_mb": _filesize_mb(format_key),
             "run": run_index,
             "error": "Subprocess died without writing to queue",
@@ -694,7 +693,7 @@ def main() -> None:
 
             elapsed_run = time.time() - t_run
             if row["status"] == "success":
-                print(f"OK  {row['duration_ms']:.0f} ms  {row['peak_memory_mb']:.0f} MiB")
+                print(f"OK  {row['duration_ms']:.0f} ms  {row['final_rss_mb']:.0f} MiB")
             elif row["status"] == "timeout":
                 print(f"TIMEOUT (>{TIMEOUT_SECONDS}s)")
             else:
@@ -725,7 +724,7 @@ def main() -> None:
     if len(success_df) > 0:
         print(f"\nSuccessful runs: {len(success_df)}")
         print(f"  Median duration: {success_df['duration_ms'].median():.1f} ms")
-        print(f"  Median peak RSS: {success_df['peak_memory_mb'].median():.1f} MiB")
+        print(f"  Median final RSS: {success_df['final_rss_mb'].median():.1f} MiB")
 
     crash_count = len(df[df["status"] == "crash"])
     timeout_count = len(df[df["status"] == "timeout"])
