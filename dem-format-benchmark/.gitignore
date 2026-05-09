@@ -1,0 +1,7 @@
+data/*
+!data/.gitkeep
+results/memray/*
+!results/memray/.gitkeep
+__pycache__/
+*.pyc
+.venv/
