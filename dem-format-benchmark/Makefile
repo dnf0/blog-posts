@@ -1,18 +1,21 @@
-.PHONY: all data bench viz post deploy clean
+.PHONY: all data bench viz post deploy clean sync
 
 all: data bench viz post
 
+sync:
+	uv sync
+
 data:
-	python scripts/data_prep.py
+	uv run python scripts/data_prep.py
 
 bench:
-	python scripts/benchmark.py
+	uv run python scripts/benchmark.py
 
 viz:
-	python scripts/visualize.py
+	uv run python scripts/visualize.py
 
 post:
-	python scripts/generate_post.py
+	uv run python scripts/generate_post.py
 
 deploy:
 	cp content/*.mdx /Users/danielfisher/repositories/dnf0.github.io/content/blog/

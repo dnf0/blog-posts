@@ -7,19 +7,32 @@ on constrained hardware (M1 Mac, 8GB RAM).
 
 ```bash
 cd dem-format-benchmark
-pip install -e .
+
+# Install dependencies with uv
+uv sync
 
 # Stage 1: Download data (run once, ~10 min)
-python scripts/data_prep.py
+uv run python scripts/data_prep.py
 
 # Stage 2: Run benchmarks (run once, ~20 min)
-python scripts/benchmark.py
+uv run python scripts/benchmark.py
 
 # Stage 3: Generate visualizations (fast, iterate freely)
-python scripts/visualize.py
+uv run python scripts/visualize.py
 
 # Stage 4: Generate blog post (fast)
-python scripts/generate_post.py
+uv run python scripts/generate_post.py
+```
+
+Or use the Makefile:
+
+```bash
+make sync   # uv sync
+make data   # Download + convert
+make bench  # Run benchmarks
+make viz    # Generate plots + tables
+make post   # Render MDX blog post
+make deploy # Copy to dnf0.github.io
 ```
 
 ## Configuration
