@@ -1,13 +1,11 @@
 """Stage 1: Download Copernicus GLO-30 DEM COG and convert to all target formats."""
 
-import json
 import time
 import sys
 from pathlib import Path
 
 import rasterio
 from rasterio.windows import Window
-from rasterio.transform import rowcol
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -18,8 +16,9 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import (
-    DATA_DIR, REGION_BOUNDS, S2_LEVEL, H3_RESOLUTION, SEED,
+    DATA_DIR, REGION_BOUNDS, S2_LEVEL, H3_RESOLUTION,
     COG_PATH, FLAT_PARQUET_PATH, S2_PARQUET_PATH, H3_PARQUET_PATH, GEOPARQUET_PATH,
+    FORMAT_PATHS, FORMAT_LABELS,
 )
 
 
@@ -53,9 +52,10 @@ def download_copernicus_dem():
             tile_urls.append(url)
 
     # Try S3 first, fall back to GDAL's network VRT
+    vrt_path = COG_PATH.parent / "dem_mosaic.vrt"
     try:
         from osgeo import gdal
-        vrt = gdal.BuildVRT(str(COG_PATH.parent / "dem_mosaic.vrt"), tile_urls)
+        vrt = gdal.BuildVRT(str(vrt_path), tile_urls)
         # Convert to COG for clean baseline
         gdal.Translate(
             str(COG_PATH),
@@ -68,9 +68,16 @@ def download_copernicus_dem():
             resampleAlg="bilinear",
         )
         vrt = None
-    except Exception:
-        print("S3 access failed. Download a single merged tile manually or use OpenTopography.")
+        # Clean up temporary VRT file
+        if vrt_path.exists():
+            vrt_path.unlink()
+    except (OSError, RuntimeError) as e:
+        print(f"S3/network access failed: {e}")
+        print("Download a single merged tile manually or use OpenTopography.")
         print(f"Place your COG at: {COG_PATH}")
+        # Clean up partial VRT file if it exists
+        if vrt_path.exists():
+            vrt_path.unlink()
         raise
 
 
@@ -120,13 +127,18 @@ def add_s2_index():
 
     print("Adding S2 cell index...")
     df = pd.read_parquet(FLAT_PARQUET_PATH)
-    df["s2_cell"] = df.apply(
-        lambda row: s2cell.s2cell.lat_lon_to_cell_id(
-            row["y"], row["x"], S2_LEVEL
-        ),
-        axis=1,
-    )
-    df["s2_cell"] = df["s2_cell"].astype("int64")
+    chunk_size = 10_000
+    s2_cells = np.empty(len(df), dtype=np.int64)
+    lats = df["y"].to_numpy()
+    lons = df["x"].to_numpy()
+    _lat_lon_to_cell_id = s2cell.s2cell.lat_lon_to_cell_id
+    for start in range(0, len(df), chunk_size):
+        end = min(start + chunk_size, len(df))
+        s2_cells[start:end] = [
+            _lat_lon_to_cell_id(lat, lon, S2_LEVEL)
+            for lat, lon in zip(lats[start:end], lons[start:end])
+        ]
+    df["s2_cell"] = s2_cells
     df.to_parquet(S2_PARQUET_PATH, compression="zstd", index=False)
     print(f"Wrote {len(df):,} rows to {S2_PARQUET_PATH}")
 
@@ -139,10 +151,9 @@ def add_h3_index():
 
     print("Adding H3 cell index...")
     df = pd.read_parquet(FLAT_PARQUET_PATH)
-    df["h3_cell"] = df.apply(
-        lambda row: h3.latlng_to_cell(row["y"], row["x"], H3_RESOLUTION),
-        axis=1,
-    )
+    lats = df["y"].to_numpy()
+    lons = df["x"].to_numpy()
+    df["h3_cell"] = h3.latlng_to_cell(lats, lons, H3_RESOLUTION)
     df["h3_cell"] = df["h3_cell"].astype("int64")
     df.to_parquet(H3_PARQUET_PATH, compression="zstd", index=False)
     print(f"Wrote {len(df):,} rows to {H3_PARQUET_PATH}")
@@ -169,7 +180,6 @@ def write_geoparquet():
 def record_file_sizes():
     """Record on-disk sizes of each format file."""
     sizes = {}
-    from config import FORMAT_PATHS, FORMAT_LABELS
     for key, path in FORMAT_PATHS.items():
         if path.exists():
             size_mb = path.stat().st_size / (1024 * 1024)
@@ -191,6 +201,13 @@ def main():
     print("\nFile sizes:")
     for name, size_mb in sizes.items():
         print(f"  {name}: {size_mb:.1f} MB")
+
+    # Verify all expected format paths exist
+    missing = [str(path) for path in FORMAT_PATHS.values() if not path.exists()]
+    if missing:
+        print("\nWARNING: The following expected files are missing:")
+        for p in missing:
+            print(f"  - {p}")
 
     elapsed = time.time() - t0
     print(f"\nData prep complete in {elapsed:.0f}s")
