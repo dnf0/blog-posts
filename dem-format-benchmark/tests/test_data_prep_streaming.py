@@ -211,3 +211,26 @@ def test_sample_band_values_for_xy_preserves_raw_order(tmp_path):
         )
 
     assert sampled.tolist() == [30, 40, 50]
+
+
+def test_build_flat_raw_writes_expected_parquet_for_tiny_cog(tmp_path, monkeypatch):
+    tif = tmp_path / "raw.tif"
+    out = tmp_path / "flat.parquet"
+    data = np.array(
+        [
+            [1.0, np.nan, 3.0],
+            [4.0, 5.0, 6.0],
+        ],
+        dtype=np.float32,
+    )
+    _write_test_tif(tif, data)
+
+    monkeypatch.setitem(data_prep.FORMAT_PATHS["cog"], "raw", tif)
+    monkeypatch.setitem(data_prep.FORMAT_PATHS["parquet_flat"], "raw", out)
+
+    data_prep._build_flat("raw")
+
+    table = pq.read_table(out)
+    assert table.num_rows == 5
+    assert table.schema.names == ["x", "y", "band_value"]
+    assert sorted(table["band_value"].to_pylist()) == [10, 30, 40, 50, 60]
