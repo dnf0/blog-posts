@@ -87,7 +87,7 @@ def _arrays_to_arrow_table(columns):
         if name in ("x", "y"):
             arrow_columns[name] = pa.array(values, pa.float64())
         elif name == "band_value":
-            arrow_columns[name] = pa.array(values, pa.int16())
+            arrow_columns[name] = pa.array(values, pa.int32())
         elif name == "s2_cell":
             arrow_columns[name] = pa.array(values, pa.int64())
         elif name == "h3_cell":
@@ -106,7 +106,14 @@ def _take_arrow_table(table, order_idx):
 
 
 def _quantize_band_values(values):
-    return np.round(values.astype(np.float32, copy=False) * 10).astype(np.int16)
+    return np.round(values.astype(np.float32, copy=False) * 10).astype(np.int32)
+
+
+def _valid_data_mask(data, nodata):
+    valid_mask = np.isfinite(data)
+    if nodata is not None and np.isfinite(nodata):
+        valid_mask &= data != nodata
+    return valid_mask
 
 
 def _pixel_centers_for_valid_window(transform, window, valid_mask):
@@ -135,7 +142,7 @@ def _iter_cog_arrow_batches(cog_path, strip_size=256, sort_hilbert=True):
             y_end = min(y_start + strip_size, height)
             window = Window(0, y_start, width, y_end - y_start)
             data = src.read(1, window=window)
-            valid_mask = np.isfinite(data)
+            valid_mask = _valid_data_mask(data, src.nodata)
             if not valid_mask.any():
                 continue
 
@@ -159,7 +166,11 @@ def _sample_band_values_for_xy(src, x_arr, y_arr):
     row = ((origin_y - y_arr) / pixel_height).astype(np.int64)
     col = np.clip(col, 0, src.width - 1)
     row = np.clip(row, 0, src.height - 1)
-    values = src.read(1, window=Window(0, 0, src.width, src.height))[row, col]
+    values = np.empty(len(row), dtype=np.float32)
+    for src_row in np.unique(row):
+        positions = np.flatnonzero(row == src_row)
+        data_row = src.read(1, window=Window(0, int(src_row), src.width, 1))[0]
+        values[positions] = data_row[col[positions]]
     return _quantize_band_values(values)
 
 
@@ -435,7 +446,7 @@ def _extract_cog_to_dataframe(cog_path, y_start, y_end, width):
 def _write_batches_to_parquet(batches_iter, output_path, schema_override=None):
     """Stream PyArrow tables to a Parquet file with delta encoding.
 
-    Uses DELTA_BINARY_PACKED for integer columns (band_value as int16,
+    Uses DELTA_BINARY_PACKED for integer columns (band_value as int32,
     s2_cell, h3_cell) for maximum compression on sorted data.
     """
     import pyarrow as pa
@@ -463,6 +474,8 @@ def _write_batches_to_parquet(batches_iter, output_path, schema_override=None):
     finally:
         if writer is not None:
             writer.close()
+    if writer is None:
+        raise ValueError("no batches to write")
 
     elapsed = time.time() - started
     row_count = pq.ParquetFile(str(output_path)).metadata.num_rows
@@ -471,7 +484,7 @@ def _write_batches_to_parquet(batches_iter, output_path, schema_override=None):
 
 
 # ---------------------------------------------------------------------------
-# Flat Parquet (Hilbert-sorted, x / y / band_value as int16 delta)
+# Flat Parquet (Hilbert-sorted, x / y / band_value as int32 delta)
 # ---------------------------------------------------------------------------
 
 def _build_flat(variant: str):
@@ -498,11 +511,11 @@ def _build_flat(variant: str):
                 if df is None or len(df) == 0:
                     continue
                 df = sort_by_hilbert(df)
-                band_int16 = np.round(df["band_value"].values * 10).astype(np.int16)
+                band_int32 = _quantize_band_values(df["band_value"].values)
                 tbl = pa.table({
                     "x": pa.array(df["x"].values, pa.float64()),
                     "y": pa.array(df["y"].values, pa.float64()),
-                    "band_value": pa.array(band_int16, pa.int16()),
+                    "band_value": pa.array(band_int32, pa.int32()),
                 })
                 yield tbl
 
@@ -515,32 +528,19 @@ def _build_flat(variant: str):
             _build_flat("raw")
 
         cog_path = FORMAT_PATHS["cog"][variant]
-        with rasterio.open(cog_path) as src:
-            full_cog = src.read(1)
-            transform = src.transform
-
-        # Geotransform: pixel_width = transform.a, pixel_height = |transform.e|
-        pixel_width = transform.a
-        pixel_height = abs(transform.e)
-        origin_x = transform.c
-        origin_y = transform.f
-
         raw_pf = pq.ParquetFile(str(raw_flat_path))
 
         def _sample_generator():
-            for batch in raw_pf.iter_batches(batch_size=500_000):
-                x_arr = batch.column("x").to_numpy()
-                y_arr = batch.column("y").to_numpy()
-                col = ((x_arr - origin_x) / pixel_width).astype(np.int64)
-                row = ((origin_y - y_arr) / pixel_height).astype(np.int64)
-                col = np.clip(col, 0, full_cog.shape[1] - 1)
-                row = np.clip(row, 0, full_cog.shape[0] - 1)
-                band_int16 = np.round(full_cog[row, col] * 10).astype(np.int16)
-                yield pa.table({
-                    "x": pa.array(x_arr, pa.float64()),
-                    "y": pa.array(y_arr, pa.float64()),
-                    "band_value": pa.array(band_int16, pa.int16()),
-                })
+            with rasterio.open(cog_path) as src:
+                for batch in raw_pf.iter_batches(batch_size=500_000):
+                    x_arr = batch.column("x").to_numpy()
+                    y_arr = batch.column("y").to_numpy()
+                    band_int32 = _sample_band_values_for_xy(src, x_arr, y_arr)
+                    yield pa.table({
+                        "x": pa.array(x_arr, pa.float64()),
+                        "y": pa.array(y_arr, pa.float64()),
+                        "band_value": pa.array(band_int32, pa.int32()),
+                    })
 
         row_count, size_mb, elapsed = _write_batches_to_parquet(_sample_generator(), output_path)
         print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
@@ -595,7 +595,7 @@ def _build_s2(variant: str):
                 tbl = pa.table({
                     "x": pa.array(df_chunk["x"].values, pa.float64()),
                     "y": pa.array(df_chunk["y"].values, pa.float64()),
-                    "band_value": pa.array(df_chunk["band_value"].values, pa.int16()),
+                    "band_value": pa.array(df_chunk["band_value"].values, pa.int32()),
                     "s2_cell": pa.array(df_chunk["s2_cell"].values, pa.int64()),
                 })
                 processed += len(df_chunk)
@@ -682,7 +682,7 @@ def _build_h3(variant: str):
                 tbl = pa.table({
                     "x": pa.array(df_chunk["x"].values, pa.float64()),
                     "y": pa.array(df_chunk["y"].values, pa.float64()),
-                    "band_value": pa.array(df_chunk["band_value"].values, pa.int16()),
+                    "band_value": pa.array(df_chunk["band_value"].values, pa.int32()),
                     "h3_cell": pa.array(df_chunk["h3_cell"].values, pa.uint64()),
                 })
                 processed += len(df_chunk)
@@ -806,7 +806,7 @@ def _build_geoparquet(variant: str):
         flat_pf = pq.ParquetFile(str(flat_path))
         geo_field = raw_pf.schema_arrow.field("geometry")
         out_schema = pa.schema([
-            pa.field("band_value", pa.int16()),
+            pa.field("band_value", pa.int32()),
             geo_field,
         ])
 
