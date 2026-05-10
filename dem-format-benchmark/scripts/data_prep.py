@@ -422,27 +422,6 @@ def analyze_run_lengths():
 # Parquet writers — streaming, Hilbert-sorted, delta-encoded
 # ======================================================================
 
-def _extract_cog_to_dataframe(cog_path, y_start, y_end, width):
-    """Read a strip from a COG and return a DataFrame of valid pixels."""
-    with rasterio.open(cog_path) as src:
-        window = Window(0, y_start, width, y_end - y_start)
-        data = src.read(1, window=window)
-        transform = src.transform
-
-    ys, xs = np.where(np.isfinite(data))
-    if len(ys) == 0:
-        return None
-
-    lons, lats = transform * (
-        xs + window.col_off + 0.5,
-        ys + window.row_off + 0.5,
-    )
-    return pd.DataFrame({
-        "x": lons, "y": lats,
-        "band_value": data[ys, xs].astype(np.float32),
-    })
-
-
 def _write_batches_to_parquet(batches_iter, output_path, schema_override=None):
     """Stream PyArrow tables to a Parquet file with delta encoding.
 
@@ -489,7 +468,6 @@ def _write_batches_to_parquet(batches_iter, output_path, schema_override=None):
 
 def _build_flat(variant: str):
     """Build flat Parquet: for non-raw variants, reuse x/y from raw and sample band_value from smoothed COG."""
-    import pyarrow as pa
     import pyarrow.parquet as pq
 
     output_path = FORMAT_PATHS["parquet_flat"][variant]
@@ -500,24 +478,9 @@ def _build_flat(variant: str):
     if variant == "raw":
         cog_path = FORMAT_PATHS["cog"]["raw"]
         print(f"  flat (raw): extracting from {cog_path.name}...")
-        with rasterio.open(cog_path) as src:
-            width, height = src.width, src.height
 
         def _batch_generator():
-            strip_size = 256
-            for y_start in range(0, height, strip_size):
-                y_end = min(y_start + strip_size, height)
-                df = _extract_cog_to_dataframe(cog_path, y_start, y_end, width)
-                if df is None or len(df) == 0:
-                    continue
-                df = sort_by_hilbert(df)
-                band_int32 = _quantize_band_values(df["band_value"].values)
-                tbl = pa.table({
-                    "x": pa.array(df["x"].values, pa.float64()),
-                    "y": pa.array(df["y"].values, pa.float64()),
-                    "band_value": pa.array(band_int32, pa.int32()),
-                })
-                yield tbl
+            yield from _iter_cog_arrow_batches(cog_path, strip_size=256, sort_hilbert=True)
 
         row_count, size_mb, elapsed = _write_batches_to_parquet(_batch_generator(), output_path)
         print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
@@ -535,11 +498,11 @@ def _build_flat(variant: str):
                 for batch in raw_pf.iter_batches(batch_size=500_000):
                     x_arr = batch.column("x").to_numpy()
                     y_arr = batch.column("y").to_numpy()
-                    band_int32 = _sample_band_values_for_xy(src, x_arr, y_arr)
-                    yield pa.table({
-                        "x": pa.array(x_arr, pa.float64()),
-                        "y": pa.array(y_arr, pa.float64()),
-                        "band_value": pa.array(band_int32, pa.int32()),
+                    band_values = _sample_band_values_for_xy(src, x_arr, y_arr)
+                    yield _arrays_to_arrow_table({
+                        "x": x_arr,
+                        "y": y_arr,
+                        "band_value": band_values,
                     })
 
         row_count, size_mb, elapsed = _write_batches_to_parquet(_sample_generator(), output_path)
