@@ -1,0 +1,40 @@
+# OS files
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+
+# Data and large results (for all blog post subprojects)
+**/data/*
+!**/data/.gitkeep
+**/results/memray/*
+!**/results/memray/.gitkeep
+**/plots/*.png
+**/plots/*.pdf
+
+# Tooling
+.claude/
+.gemini/
+*.log
