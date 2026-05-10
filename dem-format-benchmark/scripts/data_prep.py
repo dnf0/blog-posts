@@ -185,6 +185,21 @@ def _sample_band_values_for_xy(src, x_arr, y_arr):
     return _quantize_band_values(values)
 
 
+def _iter_indexed_variant_batches(raw_pf, cog_path, cell_name, batch_size=500_000):
+    """Yield raw-indexed x/y/cell rows with band values sampled from a variant COG."""
+    with rasterio.open(cog_path) as src:
+        for raw_batch in raw_pf.iter_batches(batch_size=batch_size):
+            x_arr = raw_batch.column("x").to_numpy()
+            y_arr = raw_batch.column("y").to_numpy()
+            band_values = _sample_band_values_for_xy(src, x_arr, y_arr)
+            yield _arrays_to_arrow_table({
+                "x": x_arr,
+                "y": y_arr,
+                "band_value": band_values,
+                cell_name: raw_batch.column(cell_name).to_numpy(),
+            })
+
+
 # ======================================================================
 # Download
 # ======================================================================
@@ -526,7 +541,6 @@ def _build_flat(variant: str):
 
 def _build_s2(variant: str):
     """Build S2 Parquet: for non-raw variants, reuse s2_cell from raw variant."""
-    import pyarrow as pa
     import pyarrow.parquet as pq
 
     output_path = FORMAT_PATHS["parquet_s2"][variant]
@@ -535,11 +549,11 @@ def _build_s2(variant: str):
         print(f"  s2   ({variant}): already exists ({size_mb:.1f} MB), skipping")
         return
 
-    flat_path = FORMAT_PATHS["parquet_flat"][variant]
-    if not flat_path.exists():
-        _build_flat(variant)
-
     if variant == "raw":
+        flat_path = FORMAT_PATHS["parquet_flat"][variant]
+        if not flat_path.exists():
+            _build_flat(variant)
+
         # Compute s2 cells from scratch (only done once for raw)
         import s2cell as _s2
         print(f"  s2   ({variant}): computing S2 cells and sorting...")
@@ -581,22 +595,11 @@ def _build_s2(variant: str):
         if not raw_s2_path.exists():
             _build_s2("raw")
 
-        # Read raw s2 for s2_cell + x/y, read variant flat for band_value
+        cog_path = FORMAT_PATHS["cog"][variant]
         raw_pf = pq.ParquetFile(str(raw_s2_path))
-        flat_pf = pq.ParquetFile(str(flat_path))
 
         def _reuse_generator():
-            for raw_batch, flat_batch in zip(
-                raw_pf.iter_batches(batch_size=500_000),
-                flat_pf.iter_batches(batch_size=500_000),
-            ):
-                tbl = pa.table({
-                    "x": raw_batch.column("x"),
-                    "y": raw_batch.column("y"),
-                    "band_value": flat_batch.column("band_value"),
-                    "s2_cell": raw_batch.column("s2_cell"),
-                })
-                yield tbl
+            yield from _iter_indexed_variant_batches(raw_pf, cog_path, "s2_cell")
 
         row_count, size_mb, elapsed = _write_batches_to_parquet(_reuse_generator(), output_path)
         print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
@@ -608,7 +611,6 @@ def _build_s2(variant: str):
 
 def _build_h3(variant: str):
     """Build H3 Parquet: for non-raw variants, reuse h3_cell from raw variant."""
-    import pyarrow as pa
     import pyarrow.parquet as pq
 
     output_path = FORMAT_PATHS["parquet_h3"][variant]
@@ -617,11 +619,11 @@ def _build_h3(variant: str):
         print(f"  h3   ({variant}): already exists ({size_mb:.1f} MB), skipping")
         return
 
-    flat_path = FORMAT_PATHS["parquet_flat"][variant]
-    if not flat_path.exists():
-        _build_flat(variant)
-
     if variant == "raw":
+        flat_path = FORMAT_PATHS["parquet_flat"][variant]
+        if not flat_path.exists():
+            _build_flat(variant)
+
         import h3.api.numpy_int as h3_mod
         print(f"  h3   ({variant}): computing H3 cells and sorting...")
         pf = pq.ParquetFile(str(flat_path))
@@ -661,21 +663,11 @@ def _build_h3(variant: str):
         if not raw_h3_path.exists():
             _build_h3("raw")
 
+        cog_path = FORMAT_PATHS["cog"][variant]
         raw_pf = pq.ParquetFile(str(raw_h3_path))
-        flat_pf = pq.ParquetFile(str(flat_path))
 
         def _reuse_generator():
-            for raw_batch, flat_batch in zip(
-                raw_pf.iter_batches(batch_size=500_000),
-                flat_pf.iter_batches(batch_size=500_000),
-            ):
-                tbl = pa.table({
-                    "x": raw_batch.column("x"),
-                    "y": raw_batch.column("y"),
-                    "band_value": flat_batch.column("band_value"),
-                    "h3_cell": raw_batch.column("h3_cell"),
-                })
-                yield tbl
+            yield from _iter_indexed_variant_batches(raw_pf, cog_path, "h3_cell")
 
         row_count, size_mb, elapsed = _write_batches_to_parquet(_reuse_generator(), output_path)
         print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
