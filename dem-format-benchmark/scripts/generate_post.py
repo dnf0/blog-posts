@@ -12,7 +12,8 @@ from jinja2 import Environment, FileSystemLoader
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import (
     ROOT, RESULTS_DIR, PLOTS_DIR, TABLES_DIR, CONTENT_DIR,
-    FORMAT_LABELS, TOOL_LABELS, QUERY_LABELS, FORMAT_PATHS,
+    FORMAT_LABELS, TOOL_LABELS, QUERY_LABELS, DATA_VARIANTS, VARIANT_LABELS,
+    get_path,
 )
 
 
@@ -44,32 +45,43 @@ def load_context():
         qdf = agg[agg["query_type"] == qt].sort_values("median_duration_ms")
         best[qt] = qdf.head(3).to_dict("records")
 
-    # File sizes
+    # File sizes (raw variant for baseline comparison)
     sizes = {}
-    for fmt_key, path in FORMAT_PATHS.items():
+    for fmt_key in FORMAT_LABELS:
+        path = get_path(fmt_key, "raw")
         if path.exists():
             sizes[FORMAT_LABELS[fmt_key]] = round(path.stat().st_size / (1024 * 1024), 1)
 
-    # Build file sizes markdown table
-    file_sizes_rows = "\n".join(
-        f"| {name} | {size_mb} MB |" for name, size_mb in sizes.items()
-    )
-    file_sizes_table = f"""| Format | Size |
+    # Build file sizes markdown table (all variants)
+    file_sizes_rows = []
+    for fmt_key in FORMAT_LABELS:
+        for variant in DATA_VARIANTS:
+            path = get_path(fmt_key, variant)
+            if path.exists():
+                size_mb = round(path.stat().st_size / (1024 * 1024), 1)
+                file_sizes_rows.append(
+                    f"| {FORMAT_LABELS[fmt_key]} ({variant}) | {size_mb} MB |"
+                )
+    file_sizes_table = f"""| Format (variant) | Size |
 |--------|------|
-{file_sizes_rows}"""
+{chr(10).join(file_sizes_rows)}"""
 
-    # Pixel count from flat parquet if available
-    flat_path = FORMAT_PATHS.get("parquet_flat")
-    if flat_path and flat_path.exists():
+    # Pixel count from flat parquet (raw variant)
+    flat_path = get_path("parquet_flat", "raw")
+    if flat_path.exists():
         num_pixels = len(pd.read_parquet(flat_path, columns=["x"]))
     else:
-        num_pixels = 22_000 * 22_000
-    num_pixels_million = round(num_pixels / 1_000_000, 1)
+        num_pixels = 0
+    num_pixels_million = round(num_pixels / 1_000_000, 1) if num_pixels else 22_000 * 22_000 / 1_000_000
 
-    # Total size of all format files
-    total_size_gb = sum(
-        p.stat().st_size for p in FORMAT_PATHS.values() if p.exists()
-    ) / (1024**3)
+    # Total size of all files (all variants)
+    total_size_gb = 0.0
+    for fmt_key in FORMAT_LABELS:
+        for variant in DATA_VARIANTS:
+            p = get_path(fmt_key, variant)
+            if p.exists():
+                total_size_gb += p.stat().st_size
+    total_size_gb /= (1024**3)
 
     return {
         "title": "How to Query a Massive DEM on 8GB of RAM",

@@ -16,14 +16,16 @@ import seaborn as sns  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import (  # noqa: E402
+    DATA_VARIANTS,
     FORMAT_LABELS,
-    FORMAT_PATHS,
     MEMRAY_DIR,
     PLOTS_DIR,
     QUERY_LABELS,
     RESULTS_DIR,
     TABLES_DIR,
     TOOL_LABELS,
+    VARIANT_LABELS,
+    get_path,
 )
 
 # ---------------------------------------------------------------------------
@@ -88,22 +90,25 @@ def load_results() -> pd.DataFrame:
 
 def figure_storage_size() -> None:
     """Horizontal bar chart of on-disk file sizes, saved as *01_storage_size.png*."""
-    sizes: dict[str, float] = {}
-    for fmt_key, fmt_path in FORMAT_PATHS.items():
-        if fmt_path.exists():
-            sizes[fmt_key] = fmt_path.stat().st_size / (1024 * 1024)
-        else:
-            sizes[fmt_key] = 0.0
+    sizes: list[dict] = []
+    for fmt_key in FORMAT_LABELS:
+        for variant in DATA_VARIANTS:
+            path = get_path(fmt_key, variant)
+            if path.exists():
+                sizes.append({
+                    "label": f"{FORMAT_LABELS[fmt_key]} [{variant}]",
+                    "size_mb": path.stat().st_size / (1024 * 1024),
+                })
 
-    items = sorted(sizes.items(), key=lambda x: x[1], reverse=True)
-    labels = [FORMAT_LABELS[k] for k, _ in items]
-    values = [v for _, v in items]
+    items = sorted(sizes, key=lambda x: x["size_mb"], reverse=True)
+    labels = [d["label"] for d in items]
+    values = [d["size_mb"] for d in items]
     colors = sns.color_palette("viridis", len(labels))
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=(12, 8))
     bars = ax.barh(labels, values, color=colors)
     ax.set_xlabel("File size (MiB)")
-    ax.set_title("On-disk storage size by format")
+    ax.set_title("On-disk storage size by format and variant")
     ax.invert_yaxis()
 
     for bar, val in zip(bars, values):
@@ -112,7 +117,7 @@ def figure_storage_size() -> None:
             bar.get_y() + bar.get_height() / 2,
             f"{val:.1f} MiB",
             va="center",
-            fontsize=9,
+            fontsize=7,
         )
 
     plt.tight_layout()
@@ -132,8 +137,8 @@ def scatter_by_query_type(
 ) -> None:
     """Scatter of median memory vs median duration for one query type.
 
-    Each format gets a different marker.  Saves to *filename* inside
-    ``PLOTS_DIR``.
+    Each format gets a different marker. Color by data variant.
+    Saves to *filename* inside ``PLOTS_DIR``.
     """
     subset = df[
         (df["query_type"] == query_type) & (df["status"] == "success")
@@ -143,13 +148,16 @@ def scatter_by_query_type(
         return
 
     agg = (
-        subset.groupby(["format", "format_label", "tool", "tool_label"])
+        subset.groupby(["format", "format_label", "tool", "tool_label", "data_variant"])
         .agg(
             median_duration_ms=("duration_ms", "median"),
             median_final_rss_mb=("final_rss_mb", "median"),
         )
         .reset_index()
     )
+
+    variant_order = ["raw", "s3", "s15", "s21"]
+    variant_colors = {"raw": "#1f77b4", "s3": "#ff7f0e", "s15": "#2ca02c", "s21": "#d62728"}
 
     fig, ax = plt.subplots(figsize=(9, 6))
 
@@ -159,34 +167,34 @@ def scatter_by_query_type(
             continue
         marker = FORMAT_MARKERS.get(fmt_key, "o")
         label = rows["format_label"].iloc[0]
-        # Offset tool label slightly so text doesn't overlap the marker
         for _, r in rows.iterrows():
             ax.scatter(
                 r["median_duration_ms"],
                 r["median_final_rss_mb"],
                 marker=marker,
-                s=80,
+                s=60,
                 label=label,
                 edgecolors="black",
                 linewidth=0.5,
+                color=variant_colors.get(r["data_variant"], "#333333"),
             )
             ax.annotate(
-                r["tool_label"],
+                f"{r['tool_label']}",
                 (r["median_duration_ms"], r["median_final_rss_mb"]),
                 textcoords="offset points",
                 xytext=(6, 4),
-                fontsize=7,
+                fontsize=6,
                 alpha=0.85,
             )
 
-    # Deduplicate legend entries
+    # Deduplicate legend entries (formats)
     handles, labels = ax.get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
     ax.legend(by_label.values(), by_label.keys(), fontsize=8, loc="best")
 
     ax.set_xlabel("Median duration (ms)")
     ax.set_ylabel("Median final RSS (MiB)")
-    ax.set_title(f"{QUERY_LABELS.get(query_type, query_type)} queries")
+    ax.set_title(f"{QUERY_LABELS.get(query_type, query_type)} queries (color = variant)")
     ax.set_xlim(left=0)
     ax.set_ylim(bottom=0)
 
@@ -493,14 +501,14 @@ def generate_tables(df: pd.DataFrame) -> None:
     print(f"Saved {path}")
 
     # --- file_sizes.json ---
-    file_sizes: dict[str, float] = {}
-    for fmt_key, fmt_path in FORMAT_PATHS.items():
-        if fmt_path.exists():
-            file_sizes[FORMAT_LABELS.get(fmt_key, fmt_key)] = round(
-                fmt_path.stat().st_size / (1024 * 1024), 2
-            )
-        else:
-            file_sizes[FORMAT_LABELS.get(fmt_key, fmt_key)] = 0.0
+    file_sizes: dict[str, dict] = {}
+    for fmt_key in FORMAT_LABELS:
+        fmt_name = FORMAT_LABELS.get(fmt_key, fmt_key)
+        file_sizes[fmt_name] = {}
+        for variant in DATA_VARIANTS:
+            p = get_path(fmt_key, variant)
+            if p.exists():
+                file_sizes[fmt_name][variant] = round(p.stat().st_size / (1024 * 1024), 2)
 
     path = TABLES_DIR / "file_sizes.json"
     path.write_text(json.dumps(file_sizes, indent=2) + "\n")
@@ -530,20 +538,22 @@ def generate_flame_graphs(df: pd.DataFrame) -> None:
             print(f"  No data for {query_type}, skipping flame graph.")
             continue
 
-        # Find best (format, tool) combo by median duration
+        # Find best (format, tool, variant) combo by median duration
         combo_medians = (
-            qt_data.groupby(["format", "tool"])["duration_ms"]
+            qt_data.groupby(["format", "tool", "data_variant"])["duration_ms"]
             .median()
             .sort_values()
         )
         if combo_medians.empty:
             continue
-        best_fmt, best_tool = combo_medians.index[0]
+        best_fmt, best_tool, best_variant = combo_medians.index[0]
         best_median = combo_medians.iloc[0]
 
         # Find the specific run closest to the median duration
         combo_runs = qt_data[
-            (qt_data["format"] == best_fmt) & (qt_data["tool"] == best_tool)
+            (qt_data["format"] == best_fmt)
+            & (qt_data["tool"] == best_tool)
+            & (qt_data["data_variant"] == best_variant)
         ].copy()
         combo_runs["dist_from_median"] = (
             combo_runs["duration_ms"] - best_median
@@ -551,10 +561,10 @@ def generate_flame_graphs(df: pd.DataFrame) -> None:
         best_run = combo_runs.loc[combo_runs["dist_from_median"].idxmin()]
         run_idx = int(best_run["run"])
 
-        # Build report path
+        # Build report path (now includes variant)
         report_path = (
             MEMRAY_DIR
-            / f"{best_fmt}__{best_tool}__{query_type}__run{run_idx:02d}.bin"
+            / f"{best_fmt}__{best_tool}__{query_type}__{best_variant}__run{run_idx:02d}.bin"
         )
 
         if not report_path.exists():

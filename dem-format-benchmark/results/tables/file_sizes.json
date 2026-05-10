@@ -1,0 +1,7 @@
+{
+  "COG": 1749.6,
+  "Parquet (flat)": 1889.23,
+  "Parquet + S2": 2238.86,
+  "Parquet + H3": 3064.69,
+  "GeoParquet": 2994.61
+}

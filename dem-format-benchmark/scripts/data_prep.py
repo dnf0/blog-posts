@@ -11,6 +11,7 @@ import json
 import time
 import sys
 from pathlib import Path
+from multiprocessing import Pool, cpu_count
 
 import numpy as np
 import pandas as pd
@@ -23,6 +24,42 @@ from config import (
     DATA_DIR, DATA_VARIANTS, REGION_BOUNDS, S2_LEVEL, H3_RESOLUTION,
     SMOOTHING_SIGMAS, FORMAT_PATHS, FORMAT_LABELS, TABLES_DIR,
 )
+
+
+def _s2_worker(args):
+    """Worker function for S2 cell assignment."""
+    import s2cell
+    y_col, x_col, level = args
+    cells = np.empty(len(y_col), dtype=np.int64)
+    _f = s2cell.lat_lon_to_cell_id
+    for i in range(len(y_col)):
+        cells[i] = _f(y_col[i], x_col[i], level)
+    return cells
+
+
+def _h3_worker(args):
+    """Worker function for H3 cell assignment."""
+    import h3.api.numpy_int as h3_mod
+    y_col, x_col, resolution = args
+    cells = np.empty(len(y_col), dtype=np.uint64)
+    _f = h3_mod.latlng_to_cell
+    for i in range(len(y_col)):
+        cells[i] = _f(y_col[i], x_col[i], resolution)
+    return cells
+
+
+def _is_parquet_valid(path: Path) -> bool:
+    """Check if a Parquet file exists and is readable."""
+    if not path.exists():
+        return False
+    import pyarrow.parquet as pq
+    try:
+        pq.ParquetFile(str(path))
+        return True
+    except Exception:
+        print(f"  WARNING: {path.name} is corrupted, deleting and rebuilding...")
+        path.unlink()
+        return False
 
 
 # ======================================================================
@@ -299,8 +336,21 @@ def _smooth_strip(data, sigma):
     return smoothed.astype(np.float32)
 
 
-def build_smoothed_cogs():
-    """Create smoothed COGs at sigma 3, 15, 21 from the raw COG."""
+def _median_strip(data, size):
+    """Apply median filter to a 2D array, preserving NaN/no-data."""
+    from scipy.ndimage import median_filter
+    valid_mask = np.isfinite(data)
+    # Fill NaN with 0 for filtering, then restore
+    # Note: median filter on 0s might be biased if data is all > 0
+    # but for DEM it's usually okay. A better way is masked median.
+    filled = np.where(valid_mask, data, np.nanmedian(data) if np.any(valid_mask) else 0.0)
+    smoothed = median_filter(filled.astype(np.float32), size=size, mode="nearest")
+    smoothed[~valid_mask] = np.nan
+    return smoothed.astype(np.float32)
+
+
+def build_variant_cogs():
+    """Create processed COGs (smoothed or median) from the raw COG."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
@@ -308,14 +358,27 @@ def build_smoothed_cogs():
     if not cog_raw.exists():
         raise FileNotFoundError(f"Raw COG not found: {cog_raw}")
 
-    for sigma in SMOOTHING_SIGMAS:
-        tag = f"s{sigma}"
-        cog_out = FORMAT_PATHS["cog"][tag]
-        if cog_out.exists():
-            print(f"Smoothed COG s{sigma} already exists, skipping")
+    # Process all variants except 'raw'
+    for variant in DATA_VARIANTS:
+        if variant == "raw":
             continue
 
-        print(f"Smoothing COG with sigma={sigma}...")
+        cog_out = FORMAT_PATHS["cog"][variant]
+        if cog_out.exists():
+            print(f"  COG {variant} already exists, skipping")
+            continue
+
+        if variant.startswith("s"):
+            sigma = int(variant[1:])
+            print(f"Smoothing COG with sigma={sigma}...")
+            func = lambda d: _smooth_strip(d, sigma)
+        elif variant.startswith("m"):
+            size = int(variant[1:])
+            print(f"Applying median filter with size={size}...")
+            func = lambda d: _median_strip(d, size)
+        else:
+            continue
+
         with rasterio.open(cog_raw) as src:
             profile = src.profile.copy()
 
@@ -323,13 +386,13 @@ def build_smoothed_cogs():
                 strip_size = 256
                 for y_start in tqdm(
                     range(0, src.height, strip_size),
-                    desc=f"  s{sigma} rows",
+                    desc=f"  {variant} rows",
                 ):
                     y_end = min(y_start + strip_size, src.height)
                     window = Window(0, y_start, src.width, y_end - y_start)
                     data = src.read(1, window=window)
-                    smoothed = _smooth_strip(data, sigma)
-                    dst.write(smoothed, indexes=1, window=window)
+                    processed = func(data)
+                    dst.write(processed, indexes=1, window=window)
 
         size_mb = cog_out.stat().st_size / (1024 * 1024)
         print(f"  Wrote {cog_out.name} ({size_mb:.1f} MB)")
@@ -511,7 +574,7 @@ def _build_flat(variant: str):
     import pyarrow.parquet as pq
 
     output_path = FORMAT_PATHS["parquet_flat"][variant]
-    if output_path.exists():
+    if _is_parquet_valid(output_path):
         print(f"  flat ({variant}): already exists, skipping")
         return
 
@@ -558,7 +621,7 @@ def _build_s2(variant: str):
     import pyarrow.parquet as pq
 
     output_path = FORMAT_PATHS["parquet_s2"][variant]
-    if output_path.exists():
+    if _is_parquet_valid(output_path):
         size_mb = output_path.stat().st_size / (1024 * 1024)
         print(f"  s2   ({variant}): already exists ({size_mb:.1f} MB), skipping")
         return
@@ -568,41 +631,48 @@ def _build_s2(variant: str):
         if not flat_path.exists():
             _build_flat(variant)
 
-        # Compute s2 cells from scratch (only done once for raw)
+        # Compute s2 cells in parallel
         import s2cell as _s2
-        print(f"  s2   ({variant}): computing S2 cells and sorting...")
+        print(f"  s2   ({variant}): computing S2 cells (parallel) and sorting...")
         pf = pq.ParquetFile(str(flat_path))
-        _cell = _s2.s2cell.lat_lon_to_cell_id
         batch_idx = 0
         processed = 0
         assign_timer = _StageTimer("s2 assignment")
         sort_timer = _StageTimer("s2 sort/table")
+        n_procs = max(1, cpu_count() - 1)
 
         def _batch_generator():
             nonlocal batch_idx, processed
-            for batch in pf.iter_batches(batch_size=500_000):
-                x_col = batch.column("x").to_numpy()
-                y_col = batch.column("y").to_numpy()
-                val_col = batch.column("band_value").to_numpy()
+            with Pool(processes=n_procs) as pool:
+                for batch in pf.iter_batches(batch_size=1_000_000):
+                    x_col = batch.column("x").to_numpy()
+                    y_col = batch.column("y").to_numpy()
+                    val_col = batch.column("band_value").to_numpy()
+                    n = len(x_col)
 
-                with assign_timer:
-                    s2_cells = np.empty(len(x_col), dtype=np.int64)
-                    for i in range(len(x_col)):
-                        s2_cells[i] = _cell(y_col[i], x_col[i], S2_LEVEL)
+                    with assign_timer:
+                        # Split batch into chunks for workers
+                        chunk_size = (n + n_procs - 1) // n_procs
+                        chunks = [
+                            (y_col[i:i+chunk_size], x_col[i:i+chunk_size], S2_LEVEL)
+                            for i in range(0, n, chunk_size)
+                        ]
+                        results = pool.map(_s2_worker, chunks)
+                        s2_cells = np.concatenate(results)
 
-                with sort_timer:
-                    tbl = _cell_table_sorted(
-                        x_col,
-                        y_col,
-                        val_col.astype(np.int32, copy=False),
-                        s2_cells,
-                        "s2_cell",
-                    )
-                processed += len(tbl)
-                batch_idx += 1
-                if batch_idx % 50 == 0:
-                    print(f"    batch {batch_idx}: {processed:,} rows")
-                yield tbl
+                    with sort_timer:
+                        tbl = _cell_table_sorted(
+                            x_col,
+                            y_col,
+                            val_col.astype(np.int32, copy=False),
+                            s2_cells,
+                            "s2_cell",
+                        )
+                    processed += len(tbl)
+                    batch_idx += 1
+                    if batch_idx % 25 == 0:
+                        print(f"    batch {batch_idx}: {processed:,} rows")
+                    yield tbl
 
         row_count, size_mb, elapsed = _write_batches_to_parquet(_batch_generator(), output_path)
         print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
@@ -633,7 +703,7 @@ def _build_h3(variant: str):
     import pyarrow.parquet as pq
 
     output_path = FORMAT_PATHS["parquet_h3"][variant]
-    if output_path.exists():
+    if _is_parquet_valid(output_path):
         size_mb = output_path.stat().st_size / (1024 * 1024)
         print(f"  h3   ({variant}): already exists ({size_mb:.1f} MB), skipping")
         return
@@ -643,40 +713,47 @@ def _build_h3(variant: str):
         if not flat_path.exists():
             _build_flat(variant)
 
+        # Compute h3 cells in parallel
         import h3.api.numpy_int as h3_mod
-        print(f"  h3   ({variant}): computing H3 cells and sorting...")
+        print(f"  h3   ({variant}): computing H3 cells (parallel) and sorting...")
         pf = pq.ParquetFile(str(flat_path))
         batch_idx = 0
         processed = 0
-        _f = h3_mod.latlng_to_cell
         assign_timer = _StageTimer("h3 assignment")
         sort_timer = _StageTimer("h3 sort/table")
+        n_procs = max(1, cpu_count() - 1)
 
         def _batch_generator():
             nonlocal batch_idx, processed
-            for batch in pf.iter_batches(batch_size=500_000):
-                x_col = batch.column("x").to_numpy()
-                y_col = batch.column("y").to_numpy()
-                val_col = batch.column("band_value").to_numpy()
+            with Pool(processes=n_procs) as pool:
+                for batch in pf.iter_batches(batch_size=1_000_000):
+                    x_col = batch.column("x").to_numpy()
+                    y_col = batch.column("y").to_numpy()
+                    val_col = batch.column("band_value").to_numpy()
+                    n = len(x_col)
 
-                with assign_timer:
-                    cells = np.empty(len(x_col), dtype=np.uint64)
-                    for i in range(len(x_col)):
-                        cells[i] = _f(y_col[i], x_col[i], H3_RESOLUTION)
+                    with assign_timer:
+                        chunk_size = (n + n_procs - 1) // n_procs
+                        chunks = [
+                            (y_col[i:i+chunk_size], x_col[i:i+chunk_size], H3_RESOLUTION)
+                            for i in range(0, n, chunk_size)
+                        ]
+                        results = pool.map(_h3_worker, chunks)
+                        cells = np.concatenate(results)
 
-                with sort_timer:
-                    tbl = _cell_table_sorted(
-                        x_col,
-                        y_col,
-                        val_col.astype(np.int32, copy=False),
-                        cells,
-                        "h3_cell",
-                    )
-                processed += len(tbl)
-                batch_idx += 1
-                if batch_idx % 50 == 0:
-                    print(f"    batch {batch_idx}: {processed:,} rows")
-                yield tbl
+                    with sort_timer:
+                        tbl = _cell_table_sorted(
+                            x_col,
+                            y_col,
+                            val_col.astype(np.int32, copy=False),
+                            cells,
+                            "h3_cell",
+                        )
+                    processed += len(tbl)
+                    batch_idx += 1
+                    if batch_idx % 25 == 0:
+                        print(f"    batch {batch_idx}: {processed:,} rows")
+                    yield tbl
 
         row_count, size_mb, elapsed = _write_batches_to_parquet(_batch_generator(), output_path)
         print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
@@ -707,7 +784,7 @@ def _build_geoparquet(variant: str):
     import pyarrow.parquet as pq
 
     output_path = FORMAT_PATHS["geoparquet"][variant]
-    if output_path.exists():
+    if _is_parquet_valid(output_path):
         size_mb = output_path.stat().st_size / (1024 * 1024)
         print(f"  geo  ({variant}): already exists ({size_mb:.1f} MB), skipping")
         return
@@ -833,8 +910,8 @@ def main():
     # 1. Download raw COG
     download_copernicus_dem()
 
-    # 2. Build smoothed COGs
-    build_smoothed_cogs()
+    # 2. Build variant COGs (smoothed/median)
+    build_variant_cogs()
 
     # 3. Run-length analysis
     analyze_run_lengths()
