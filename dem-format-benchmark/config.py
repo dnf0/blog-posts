@@ -51,7 +51,7 @@ SAMPLE_POLYGON_GEOJSON = {
 
 # ---- Smoothing variants ----
 SMOOTHING_SIGMAS = [3, 15, 21]
-DATA_VARIANTS = ["raw", "s3", "s15", "s21", "m10", "m20", "m50", "m100"]
+DATA_VARIANTS = ["raw", "s3", "s15", "s21", "m10", "m20"]
 
 
 def _build_paths():
@@ -159,8 +159,6 @@ VARIANT_LABELS = {
     "s21": "Smoothed (=21)",
     "m10": "Median Filter (size=10)",
     "m20": "Median Filter (size=20)",
-    "m50": "Median Filter (size=50)",
-    "m100": "Median Filter (size=100)",
 }
 
 

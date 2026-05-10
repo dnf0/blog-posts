@@ -25,6 +25,7 @@ dependencies = [
     "hilbertcurve>=2.0",
     "s2sphere>=0.2",
     "pytest>=8.0",
+    "opencv-python>=4.13.0.92",
 ]
 
 [build-system]

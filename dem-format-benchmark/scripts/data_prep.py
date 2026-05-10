@@ -62,6 +62,16 @@ def _is_parquet_valid(path: Path) -> bool:
         return False
 
 
+def _process_strip_worker(args):
+    """Worker function for processing a single image strip."""
+    data, variant_type, param = args
+    if variant_type == "s":
+        return _smooth_strip(data, param)
+    elif variant_type == "m":
+        return _median_strip(data, param)
+    return data
+
+
 # ======================================================================
 # Hilbert curve (vectorized, order p, 2D)
 # ======================================================================
@@ -369,35 +379,46 @@ def build_variant_cogs():
             continue
 
         if variant.startswith("s"):
-            sigma = int(variant[1:])
-            print(f"Smoothing COG with sigma={sigma}...")
-            func = lambda d: _smooth_strip(d, sigma)
+            variant_type = "s"
+            param = int(variant[1:])
+            print(f"Smoothing COG with sigma={param} (parallel)...")
         elif variant.startswith("m"):
-            size = int(variant[1:])
-            print(f"Applying median filter with size={size}...")
-            func = lambda d: _median_strip(d, size)
+            variant_type = "m"
+            param = int(variant[1:])
+            print(f"Applying median filter with size={param} (parallel)...")
         else:
             continue
 
         with rasterio.open(cog_raw) as src:
             profile = src.profile.copy()
+            height, width = src.height, src.width
+            strip_size = 256
+            
+            with Pool(processes=max(1, cpu_count() - 1)) as pool:
+                with rasterio.open(cog_out, "w", **profile) as dst:
+                    # Queue up all strips
+                    tasks = []
+                    windows = []
+                    for y_start in range(0, height, strip_size):
+                        y_end = min(y_start + strip_size, height)
+                        window = Window(0, y_start, width, y_end - y_start)
+                        data = src.read(1, window=window)
+                        tasks.append((data, variant_type, param))
+                        windows.append(window)
 
-            with rasterio.open(cog_out, "w", **profile) as dst:
-                strip_size = 256
-                for y_start in tqdm(
-                    range(0, src.height, strip_size),
-                    desc=f"  {variant} rows",
-                ):
-                    y_end = min(y_start + strip_size, src.height)
-                    window = Window(0, y_start, src.width, y_end - y_start)
-                    data = src.read(1, window=window)
-                    processed = func(data)
-                    dst.write(processed, indexes=1, window=window)
+                    # Process in parallel with progress bar
+                    results = list(tqdm(
+                        pool.imap(_process_strip_worker, tasks),
+                        total=len(tasks),
+                        desc=f"  {variant} strips",
+                    ))
+
+                    # Write results sequentially
+                    for processed, window in zip(results, windows):
+                        dst.write(processed, indexes=1, window=window)
 
         size_mb = cog_out.stat().st_size / (1024 * 1024)
         print(f"  Wrote {cog_out.name} ({size_mb:.1f} MB)")
-
-
 # ======================================================================
 # Run-length analysis
 # ======================================================================
