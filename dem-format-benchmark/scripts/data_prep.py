@@ -506,8 +506,8 @@ def _build_flat(variant: str):
                 })
                 yield tbl
 
-        row_count, size_mb = _write_batches_to_parquet(_batch_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB)")
+        row_count, size_mb, elapsed = _write_batches_to_parquet(_batch_generator(), output_path)
+        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
     else:
         print(f"  flat ({variant}): reusing x/y from raw flat, sampling band_value from COG...")
         raw_flat_path = FORMAT_PATHS["parquet_flat"]["raw"]
@@ -542,8 +542,8 @@ def _build_flat(variant: str):
                     "band_value": pa.array(band_int16, pa.int16()),
                 })
 
-        row_count, size_mb = _write_batches_to_parquet(_sample_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB)")
+        row_count, size_mb, elapsed = _write_batches_to_parquet(_sample_generator(), output_path)
+        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
 
 
 # ---------------------------------------------------------------------------
@@ -604,8 +604,8 @@ def _build_s2(variant: str):
                     print(f"    batch {batch_idx}: {processed:,} rows")
                 yield tbl
 
-        row_count, size_mb = _write_batches_to_parquet(_batch_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB)")
+        row_count, size_mb, elapsed = _write_batches_to_parquet(_batch_generator(), output_path)
+        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
     else:
         # Reuse s2_cell from raw variant — S2 cell depends only on (x,y), not elevation
         print(f"  s2   ({variant}): reusing s2_cell from raw, swapping band_value...")
@@ -630,8 +630,8 @@ def _build_s2(variant: str):
                 })
                 yield tbl
 
-        row_count, size_mb = _write_batches_to_parquet(_reuse_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB)")
+        row_count, size_mb, elapsed = _write_batches_to_parquet(_reuse_generator(), output_path)
+        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
 
 
 # ---------------------------------------------------------------------------
@@ -691,8 +691,8 @@ def _build_h3(variant: str):
                     print(f"    batch {batch_idx}: {processed:,} rows")
                 yield tbl
 
-        row_count, size_mb = _write_batches_to_parquet(_batch_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB)")
+        row_count, size_mb, elapsed = _write_batches_to_parquet(_batch_generator(), output_path)
+        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
     else:
         print(f"  h3   ({variant}): reusing h3_cell from raw, swapping band_value...")
         raw_h3_path = FORMAT_PATHS["parquet_h3"]["raw"]
@@ -715,8 +715,8 @@ def _build_h3(variant: str):
                 })
                 yield tbl
 
-        row_count, size_mb = _write_batches_to_parquet(_reuse_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB)")
+        row_count, size_mb, elapsed = _write_batches_to_parquet(_reuse_generator(), output_path)
+        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
 
 
 # ---------------------------------------------------------------------------
@@ -820,8 +820,8 @@ def _build_geoparquet(variant: str):
                     "geometry": raw_batch.column("geometry"),
                 }, schema=out_schema)
 
-        row_count, size_mb = _write_batches_to_parquet(_reuse_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB)")
+        row_count, size_mb, elapsed = _write_batches_to_parquet(_reuse_generator(), output_path)
+        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
 
 
 # ======================================================================
