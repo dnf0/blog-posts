@@ -97,6 +97,20 @@ def _arrays_to_arrow_table(columns):
     return pa.table(arrow_columns)
 
 
+class _StageTimer:
+    def __init__(self, label):
+        self.label = label
+        self.elapsed = 0.0
+
+    def __enter__(self):
+        self._started = time.time()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.elapsed += time.time() - self._started
+        return False
+
+
 def _cell_table_sorted(x_col, y_col, val_col, cell_col, cell_name):
     order_idx = np.argsort(cell_col)
     columns = {
@@ -561,6 +575,8 @@ def _build_s2(variant: str):
         _cell = _s2.s2cell.lat_lon_to_cell_id
         batch_idx = 0
         processed = 0
+        assign_timer = _StageTimer("s2 assignment")
+        sort_timer = _StageTimer("s2 sort/table")
 
         def _batch_generator():
             nonlocal batch_idx, processed
@@ -569,17 +585,19 @@ def _build_s2(variant: str):
                 y_col = batch.column("y").to_numpy()
                 val_col = batch.column("band_value").to_numpy()
 
-                s2_cells = np.empty(len(x_col), dtype=np.int64)
-                for i in range(len(x_col)):
-                    s2_cells[i] = _cell(y_col[i], x_col[i], S2_LEVEL)
+                with assign_timer:
+                    s2_cells = np.empty(len(x_col), dtype=np.int64)
+                    for i in range(len(x_col)):
+                        s2_cells[i] = _cell(y_col[i], x_col[i], S2_LEVEL)
 
-                tbl = _cell_table_sorted(
-                    x_col,
-                    y_col,
-                    val_col.astype(np.int32, copy=False),
-                    s2_cells,
-                    "s2_cell",
-                )
+                with sort_timer:
+                    tbl = _cell_table_sorted(
+                        x_col,
+                        y_col,
+                        val_col.astype(np.int32, copy=False),
+                        s2_cells,
+                        "s2_cell",
+                    )
                 processed += len(tbl)
                 batch_idx += 1
                 if batch_idx % 50 == 0:
@@ -588,6 +606,7 @@ def _build_s2(variant: str):
 
         row_count, size_mb, elapsed = _write_batches_to_parquet(_batch_generator(), output_path)
         print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
+        print(f"    s2 assignment: {assign_timer.elapsed:.1f}s; sort/table: {sort_timer.elapsed:.1f}s")
     else:
         # Reuse s2_cell from raw variant — S2 cell depends only on (x,y), not elevation
         print(f"  s2   ({variant}): reusing s2_cell from raw, swapping band_value...")
@@ -630,6 +649,8 @@ def _build_h3(variant: str):
         batch_idx = 0
         processed = 0
         _f = h3_mod.latlng_to_cell
+        assign_timer = _StageTimer("h3 assignment")
+        sort_timer = _StageTimer("h3 sort/table")
 
         def _batch_generator():
             nonlocal batch_idx, processed
@@ -638,17 +659,19 @@ def _build_h3(variant: str):
                 y_col = batch.column("y").to_numpy()
                 val_col = batch.column("band_value").to_numpy()
 
-                cells = np.empty(len(x_col), dtype=np.uint64)
-                for i in range(len(x_col)):
-                    cells[i] = _f(y_col[i], x_col[i], H3_RESOLUTION)
+                with assign_timer:
+                    cells = np.empty(len(x_col), dtype=np.uint64)
+                    for i in range(len(x_col)):
+                        cells[i] = _f(y_col[i], x_col[i], H3_RESOLUTION)
 
-                tbl = _cell_table_sorted(
-                    x_col,
-                    y_col,
-                    val_col.astype(np.int32, copy=False),
-                    cells,
-                    "h3_cell",
-                )
+                with sort_timer:
+                    tbl = _cell_table_sorted(
+                        x_col,
+                        y_col,
+                        val_col.astype(np.int32, copy=False),
+                        cells,
+                        "h3_cell",
+                    )
                 processed += len(tbl)
                 batch_idx += 1
                 if batch_idx % 50 == 0:
@@ -657,6 +680,7 @@ def _build_h3(variant: str):
 
         row_count, size_mb, elapsed = _write_batches_to_parquet(_batch_generator(), output_path)
         print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
+        print(f"    h3 assignment: {assign_timer.elapsed:.1f}s; sort/table: {sort_timer.elapsed:.1f}s")
     else:
         print(f"  h3   ({variant}): reusing h3_cell from raw, swapping band_value...")
         raw_h3_path = FORMAT_PATHS["parquet_h3"]["raw"]
