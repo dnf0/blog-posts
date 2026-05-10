@@ -97,6 +97,17 @@ def _arrays_to_arrow_table(columns):
     return pa.table(arrow_columns)
 
 
+def _cell_table_sorted(x_col, y_col, val_col, cell_col, cell_name):
+    order_idx = np.argsort(cell_col)
+    columns = {
+        "x": x_col[order_idx],
+        "y": y_col[order_idx],
+        "band_value": val_col[order_idx],
+        cell_name: cell_col[order_idx],
+    }
+    return _arrays_to_arrow_table(columns)
+
+
 def _take_arrow_table(table, order_idx):
     """Return a table with every column reordered by a NumPy integer index."""
     import pyarrow as pa
@@ -548,20 +559,14 @@ def _build_s2(variant: str):
                 for i in range(len(x_col)):
                     s2_cells[i] = _cell(y_col[i], x_col[i], S2_LEVEL)
 
-                df_chunk = pd.DataFrame({
-                    "x": x_col, "y": y_col,
-                    "band_value": val_col,
-                    "s2_cell": s2_cells,
-                })
-                df_chunk = df_chunk.sort_values("s2_cell").reset_index(drop=True)
-
-                tbl = pa.table({
-                    "x": pa.array(df_chunk["x"].values, pa.float64()),
-                    "y": pa.array(df_chunk["y"].values, pa.float64()),
-                    "band_value": pa.array(df_chunk["band_value"].values, pa.int32()),
-                    "s2_cell": pa.array(df_chunk["s2_cell"].values, pa.int64()),
-                })
-                processed += len(df_chunk)
+                tbl = _cell_table_sorted(
+                    x_col,
+                    y_col,
+                    val_col.astype(np.int32, copy=False),
+                    s2_cells,
+                    "s2_cell",
+                )
+                processed += len(tbl)
                 batch_idx += 1
                 if batch_idx % 50 == 0:
                     print(f"    batch {batch_idx}: {processed:,} rows")
@@ -635,20 +640,14 @@ def _build_h3(variant: str):
                 for i in range(len(x_col)):
                     cells[i] = _f(y_col[i], x_col[i], H3_RESOLUTION)
 
-                df_chunk = pd.DataFrame({
-                    "x": x_col, "y": y_col,
-                    "band_value": val_col,
-                    "h3_cell": cells,
-                })
-                df_chunk = df_chunk.sort_values("h3_cell").reset_index(drop=True)
-
-                tbl = pa.table({
-                    "x": pa.array(df_chunk["x"].values, pa.float64()),
-                    "y": pa.array(df_chunk["y"].values, pa.float64()),
-                    "band_value": pa.array(df_chunk["band_value"].values, pa.int32()),
-                    "h3_cell": pa.array(df_chunk["h3_cell"].values, pa.uint64()),
-                })
-                processed += len(df_chunk)
+                tbl = _cell_table_sorted(
+                    x_col,
+                    y_col,
+                    val_col.astype(np.int32, copy=False),
+                    cells,
+                    "h3_cell",
+                )
+                processed += len(tbl)
                 batch_idx += 1
                 if batch_idx % 50 == 0:
                     print(f"    batch {batch_idx}: {processed:,} rows")
