@@ -1,52 +1,32 @@
-"""Stage 1: Download Copernicus GLO-30 DEM COG, smooth, and convert to all target formats.
+"""Stage 1: Download Copernicus GLO-30 DEM COG, quantize, and convert to all target formats.
 
-Generates 4 data variants (raw, s3, s15, s21) for each of 5 formats (COG,
-Parquet flat, Parquet+S2, Parquet+H3, GeoParquet). Parquet files use Hilbert
-curve ordering within chunks for RLE/dictionary compression efficiency.
-
-All processing is streaming (batch-based) to stay within 8 GB RAM.
+Uses Python/Rasterio for the initial extraction to a temporary base Parquet,
+and DuckDB/Polars for generating geometries, H3, S2, and optimized Parquets.
 """
 
-import json
 import time
 import sys
 from pathlib import Path
-from multiprocessing import Pool, cpu_count
-
-import numpy as np
-import pandas as pd
 import rasterio
 from rasterio.windows import Window
-from tqdm import tqdm
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import (
     DATA_DIR, DATA_VARIANTS, REGION_BOUNDS, S2_LEVEL, H3_RESOLUTION,
-    SMOOTHING_SIGMAS, FORMAT_PATHS, FORMAT_LABELS, TABLES_DIR,
+    FORMAT_PATHS, FORMAT_LABELS, TABLES_DIR,
 )
+def _quantize_band_values(values):
+    return np.round(values.astype(np.float32, copy=False)).astype(np.int16)
 
 
-def _s2_worker(args):
-    """Worker function for S2 cell assignment."""
-    import s2cell
-    y_col, x_col, level = args
-    cells = np.empty(len(y_col), dtype=np.int64)
-    _f = s2cell.lat_lon_to_cell_id
-    for i in range(len(y_col)):
-        cells[i] = _f(y_col[i], x_col[i], level)
-    return cells
-
-
-def _h3_worker(args):
-    """Worker function for H3 cell assignment."""
-    import h3.api.numpy_int as h3_mod
-    y_col, x_col, resolution = args
-    cells = np.empty(len(y_col), dtype=np.uint64)
-    _f = h3_mod.latlng_to_cell
-    for i in range(len(y_col)):
-        cells[i] = _f(y_col[i], x_col[i], resolution)
-    return cells
-
+def _valid_data_mask(data, nodata):
+    valid_mask = np.isfinite(data)
+    if nodata is not None and np.isfinite(nodata):
+        valid_mask &= data != nodata
+    return valid_mask
 
 def _is_parquet_valid(path: Path) -> bool:
     """Check if a Parquet file exists and is readable."""
@@ -60,210 +40,6 @@ def _is_parquet_valid(path: Path) -> bool:
         print(f"  WARNING: {path.name} is corrupted, deleting and rebuilding...")
         path.unlink()
         return False
-
-
-def _process_strip_worker(args):
-    """Worker function for processing a single image strip."""
-    data, variant_type, param = args
-    if variant_type == "s":
-        return _smooth_strip(data, param)
-    elif variant_type == "m":
-        return _median_strip(data, param)
-    return data
-
-
-# ======================================================================
-# Hilbert curve (vectorized, order p, 2D)
-# ======================================================================
-
-def _hilbert_indices(x_arr, y_arr, x_min, y_min, x_scale, y_scale, order=15):
-    """Compute Hilbert curve indices for arrays of (x, y) coordinates.
-
-    Uses the classic bit-manipulation algorithm vectorized with numpy.
-    Returns int64 indices suitable for sorting.
-    """
-    n = 1 << order
-    xi = ((x_arr - x_min) / x_scale).astype(np.int64)
-    yi = ((y_arr - y_min) / y_scale).astype(np.int64)
-    xi = np.clip(xi, 0, n - 1)
-    yi = np.clip(yi, 0, n - 1)
-
-    # Vectorized Hilbert curve algorithm
-    d = np.zeros(len(xi), dtype=np.int64)
-    s = n >> 1
-    while s > 0:
-        rx = (xi & s) > 0
-        ry = (yi & s) > 0
-        d += np.int64(s) * s * ((3 * rx.astype(np.int64)) ^ ry.astype(np.int64))
-        # Rotate quadrants
-        mask_no_rx = ~rx
-        mask_rx_ry = rx & ~ry
-        mask_rx_nry = rx & ry
-        # When rx=0, ry=1: swap x and y
-        xi_temp = xi.copy()
-        xi = np.where(mask_no_rx & ry, yi, xi)
-        yi = np.where(mask_no_rx & ry, xi_temp, yi)
-        # When rx=1, ry=0: rotate to bottom-right
-        xi = np.where(mask_rx_ry, n - 1 - xi, xi)
-        yi = np.where(mask_rx_ry, n - 1 - yi, yi)
-        # When rx=1, ry=1: rotate to top-right
-        xi = np.where(mask_rx_nry, n - 1 - xi, xi)
-        yi = np.where(mask_rx_nry, n - 1 - yi, yi)
-        s >>= 1
-    return d
-
-
-def sort_by_hilbert(df, x_col="x", y_col="y", order=15):
-    """Sort a DataFrame by Hilbert curve index for spatial locality."""
-    x = df[x_col].to_numpy()
-    y = df[y_col].to_numpy()
-    res = 30.0 / 111320.0  # ~30m at these latitudes
-    hilbert = _hilbert_indices(
-        x, y, REGION_BOUNDS["min_lon"], REGION_BOUNDS["min_lat"], res, res, order,
-    )
-    order_idx = np.argsort(hilbert)
-    return df.iloc[order_idx].reset_index(drop=True)
-
-
-def _arrays_to_arrow_table(columns):
-    """Build an Arrow table from NumPy arrays using the benchmark schema types."""
-    import pyarrow as pa
-
-    arrow_columns = {}
-    for name, values in columns.items():
-        if name in ("x", "y"):
-            arrow_columns[name] = pa.array(values, pa.float64())
-        elif name == "band_value":
-            arrow_columns[name] = pa.array(values, pa.int32())
-        elif name == "s2_cell":
-            arrow_columns[name] = pa.array(values, pa.int64())
-        elif name == "h3_cell":
-            arrow_columns[name] = pa.array(values, pa.uint64())
-        else:
-            arrow_columns[name] = pa.array(values)
-    return pa.table(arrow_columns)
-
-
-class _StageTimer:
-    def __init__(self, label):
-        self.label = label
-        self.elapsed = 0.0
-
-    def __enter__(self):
-        self._started = time.time()
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        self.elapsed += time.time() - self._started
-        return False
-
-
-def _cell_table_sorted(x_col, y_col, val_col, cell_col, cell_name):
-    order_idx = np.argsort(cell_col)
-    columns = {
-        "x": x_col[order_idx],
-        "y": y_col[order_idx],
-        "band_value": val_col[order_idx],
-        cell_name: cell_col[order_idx],
-    }
-    return _arrays_to_arrow_table(columns)
-
-
-def _take_arrow_table(table, order_idx):
-    """Return a table with every column reordered by a NumPy integer index."""
-    import pyarrow as pa
-
-    take_idx = pa.array(order_idx.astype(np.int64, copy=False), pa.int64())
-    return table.take(take_idx)
-
-
-def _quantize_band_values(values):
-    return np.round(values.astype(np.float32, copy=False) * 10).astype(np.int32)
-
-
-def _valid_data_mask(data, nodata):
-    valid_mask = np.isfinite(data)
-    if nodata is not None and np.isfinite(nodata):
-        valid_mask &= data != nodata
-    return valid_mask
-
-
-def _pixel_centers_for_valid_window(transform, window, valid_mask):
-    rows, cols = np.nonzero(valid_mask)
-    x = transform.c + (cols + window.col_off + 0.5) * transform.a
-    y = transform.f + (rows + window.row_off + 0.5) * transform.e
-    return x.astype(np.float64, copy=False), y.astype(np.float64, copy=False), rows, cols
-
-
-def _table_sorted_by_hilbert(table, order=15):
-    x = table.column("x").to_numpy()
-    y = table.column("y").to_numpy()
-    res = 30.0 / 111320.0
-    hilbert = _hilbert_indices(
-        x, y, REGION_BOUNDS["min_lon"], REGION_BOUNDS["min_lat"], res, res, order,
-    )
-    return _take_arrow_table(table, np.argsort(hilbert))
-
-
-def _iter_cog_arrow_batches(cog_path, strip_size=256, sort_hilbert=True):
-    """Yield Arrow tables of valid COG pixels without per-pixel Python loops."""
-    with rasterio.open(cog_path) as src:
-        width, height = src.width, src.height
-        transform = src.transform
-        for y_start in range(0, height, strip_size):
-            y_end = min(y_start + strip_size, height)
-            window = Window(0, y_start, width, y_end - y_start)
-            data = src.read(1, window=window)
-            valid_mask = _valid_data_mask(data, src.nodata)
-            if not valid_mask.any():
-                continue
-
-            x, y, rows, cols = _pixel_centers_for_valid_window(transform, window, valid_mask)
-            table = _arrays_to_arrow_table({
-                "x": x,
-                "y": y,
-                "band_value": _quantize_band_values(data[rows, cols]),
-            })
-            yield _table_sorted_by_hilbert(table) if sort_hilbert else table
-
-
-def _sample_band_values_for_xy(src, x_arr, y_arr):
-    """Sample quantized DEM values for existing x/y arrays from an open raster."""
-    transform = src.transform
-    pixel_width = transform.a
-    pixel_height = abs(transform.e)
-    origin_x = transform.c
-    origin_y = transform.f
-    col = ((x_arr - origin_x) / pixel_width).astype(np.int64)
-    row = ((origin_y - y_arr) / pixel_height).astype(np.int64)
-    col = np.clip(col, 0, src.width - 1)
-    row = np.clip(row, 0, src.height - 1)
-    values = np.empty(len(row), dtype=np.float32)
-    for src_row in np.unique(row):
-        positions = np.flatnonzero(row == src_row)
-        data_row = src.read(1, window=Window(0, int(src_row), src.width, 1))[0]
-        values[positions] = data_row[col[positions]]
-    return _quantize_band_values(values)
-
-
-def _iter_indexed_variant_batches(raw_pf, cog_path, cell_name, batch_size=500_000):
-    """Yield raw-indexed x/y/cell rows with band values sampled from a variant COG."""
-    with rasterio.open(cog_path) as src:
-        for raw_batch in raw_pf.iter_batches(batch_size=batch_size):
-            x_arr = raw_batch.column("x").to_numpy()
-            y_arr = raw_batch.column("y").to_numpy()
-            band_values = _sample_band_values_for_xy(src, x_arr, y_arr)
-            yield _arrays_to_arrow_table({
-                "x": x_arr,
-                "y": y_arr,
-                "band_value": band_values,
-                cell_name: raw_batch.column(cell_name).to_numpy(),
-            })
-
-
-# ======================================================================
-# Download
-# ======================================================================
 
 def _collect_tile_grid(bounds):
     min_lon = int(bounds["min_lon"])
@@ -282,7 +58,6 @@ def _collect_tile_grid(bounds):
             url = f"/vsis3/copernicus-dem-30m/{tile_name}/{tile_name}.tif"
             tiles.append((lon, lat, url))
     return tiles
-
 
 def download_copernicus_dem():
     cog_raw = FORMAT_PATHS["cog"]["raw"]
@@ -330,40 +105,177 @@ def download_copernicus_dem():
                 ))
                 print(f"  lon={lon} lat={lat}: {data.shape}")
 
+def _create_base_parquet():
+    """Extract valid pixels from the raw COG into a fast, unsorted base Parquet file."""
+    base_raw_path = DATA_DIR / "dem_base_raw.parquet"
+    if base_raw_path.exists():
+        return base_raw_path
+        
+    cog_path = FORMAT_PATHS["cog"]["raw"]
+    print(f"Creating base Parquet from {cog_path.name}...")
+    
+    schema = pa.schema([
+        pa.field("col", pa.uint32()),
+        pa.field("row", pa.uint32()),
+        pa.field("band_value", pa.int16()),
+    ])
+    
+    with rasterio.open(cog_path) as src:
+        width, height = src.width, src.height
+        transform = src.transform
+        strip_size = 256
+        
+        with pq.ParquetWriter(str(base_raw_path), schema, compression="lz4") as writer:
+            from tqdm import tqdm
+            for y_start in tqdm(range(0, height, strip_size), desc="  Extracting"):
+                y_end = min(y_start + strip_size, height)
+                window = Window(0, y_start, width, y_end - y_start)
+                data = src.read(1, window=window)
+                valid_mask = _valid_data_mask(data, src.nodata)
+                if not valid_mask.any():
+                    continue
 
-# ======================================================================
-# Gaussian smoothing
-# ======================================================================
-
-def _smooth_strip(data, sigma):
-    """Apply Gaussian filter to a 2D array, preserving NaN/no-data."""
-    from scipy.ndimage import gaussian_filter
-    valid_mask = np.isfinite(data)
-    # Fill NaN with 0 for filtering, then restore
-    filled = np.where(valid_mask, data, 0.0)
-    smoothed = gaussian_filter(filled.astype(np.float64), sigma=sigma, mode="nearest")
-    smoothed[~valid_mask] = np.nan
-    return smoothed.astype(np.float32)
+                rows, cols = np.nonzero(valid_mask)
+                table = pa.table([
+                    pa.array((cols + window.col_off).astype(np.uint32)),
+                    pa.array((rows + window.row_off).astype(np.uint32)),
+                    pa.array(_quantize_band_values(data[rows, cols]))
+                ], schema=schema)
+                writer.write_table(table)
+                
+    print(f"  Wrote {base_raw_path.name} ({base_raw_path.stat().st_size / (1024*1024):.1f} MB)")
+    return base_raw_path
 
 
-def _median_strip(data, size):
-    """Apply median filter to a 2D array, preserving NaN/no-data."""
-    from scipy.ndimage import median_filter
-    valid_mask = np.isfinite(data)
-    # Fill NaN with 0 for filtering, then restore
-    # Note: median filter on 0s might be biased if data is all > 0
-    # but for DEM it's usually okay. A better way is masked median.
-    filled = np.where(valid_mask, data, np.nanmedian(data) if np.any(valid_mask) else 0.0)
-    smoothed = median_filter(filled.astype(np.float32), size=size, mode="nearest")
-    smoothed[~valid_mask] = np.nan
-    return smoothed.astype(np.float32)
+def build_duckdb_variants(variant: str, base_raw_path: Path):
+    """Use DuckDB to generate flat, H3, and GeoParquet from the base Parquet."""
+    import duckdb
+    import pyarrow.parquet as pq
+    
+    con = duckdb.connect()
+    con.execute("INSTALL spatial; LOAD spatial; INSTALL h3; LOAD h3;")
+    
+    # Read the base parquet and get transform
+    cog_path = FORMAT_PATHS["cog"]["raw"]
+    with rasterio.open(cog_path) as src:
+        tr = src.transform
+        # Create a view that computes actual x, y
+        # and applies quantization if variant is q*
+        quantize_expr = "CAST(band_value AS SMALLINT)"
+        if variant.startswith("q"):
+            q_val = int(variant[1:])
+            quantize_expr = f"CAST(ROUND(band_value / {q_val}.0) * {q_val} AS SMALLINT)"
+            
+        con.execute(f"""
+            CREATE VIEW base AS 
+            SELECT 
+                {tr.c} + (col + 0.5) * {tr.a} AS x,
+                {tr.f} + (row + 0.5) * {tr.e} AS y,
+                {quantize_expr} AS band_value
+            FROM read_parquet('{base_raw_path}')
+        """)
+
+    # 1. Parquet Flat (sorted by S2 to maintain some spatial locality)
+    flat_path = FORMAT_PATHS["parquet_flat"][variant]
+    if not _is_parquet_valid(flat_path):
+        print(f"  [{variant}] writing flat parquet (DuckDB)...")
+        con.execute(f"""
+            COPY (
+                SELECT x, y, band_value 
+                FROM base 
+            ) TO '{flat_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+        """)
+
+    # 2. GeoParquet
+    geo_path = FORMAT_PATHS["geoparquet"][variant]
+    if not _is_parquet_valid(geo_path):
+        print(f"  [{variant}] writing geoparquet (DuckDB)...")
+        con.execute(f"""
+            COPY (
+                SELECT ST_Point(x, y) AS geometry, band_value 
+                FROM base
+            ) TO '{geo_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+        """)
+
+
+def build_zorder_variant(variant: str, base_raw_path: Path):
+    """Use Polars and Rust plugin to generate Z-order Parquet."""
+    import polars as pl
+    import pyarrow.parquet as pq
+    import sys
+    from pathlib import Path
+    
+    scripts_dir = str(Path(__file__).resolve().parent)
+    if scripts_dir not in sys.path:
+        sys.path.append(scripts_dir)
+        
+    from scripts.zorder_plugin import compute_zorder, compact_zorder
+    
+    zorder_path = FORMAT_PATHS["parquet_zorder"][variant]
+    if _is_parquet_valid(zorder_path):
+        return
+
+    print(f"  [{variant}] writing zorder parquet (Polars/Rust)...")
+    
+    cog_path = FORMAT_PATHS["cog"]["raw"]
+    with rasterio.open(cog_path) as src:
+        transform = src.transform
+
+    quantize_expr = pl.col("band_value").cast(pl.Int16)
+    if variant.startswith("q"):
+        q_val = int(variant[1:])
+        quantize_expr = ((pl.col("band_value") / float(q_val)).round() * q_val).cast(pl.Int16)
+
+    # Stream from the base parquet
+    q = (
+        pl.scan_parquet(str(base_raw_path))
+        .with_columns([
+            quantize_expr.alias("band_value"),
+            (((transform.c + pl.col("col") * transform.a) + 180.0) * 3600.0).round().cast(pl.UInt32).alias("global_col"),
+            ((90.0 - (transform.f + pl.col("row") * transform.e)) * 3600.0).round().cast(pl.UInt32).alias("global_row")
+        ])
+        .with_columns([
+            compute_zorder("global_col", "global_row").alias("z_index")
+        ])
+        .group_by("band_value")
+        .agg(pl.col("z_index"))
+        .with_columns(
+            compact_zorder(pl.col("z_index")).alias("z_index")
+        )
+        .explode("z_index")
+        .sort("z_index")
+        .select(["band_value", "z_index"])
+    )
+    
+    q.sink_parquet(
+        str(zorder_path),
+        compression="zstd",
+    )
+
+
+def record_file_sizes():
+    sizes = {}
+    for variant in DATA_VARIANTS:
+        variant_sizes = {}
+        for fmt_key, fmt_paths in FORMAT_PATHS.items():
+            path = fmt_paths[variant]
+            if path.exists():
+                if path.is_dir():
+                    # For Zarr directories, sum up all files
+                    total_size = sum(f.stat().st_size for f in path.rglob('*') if f.is_file())
+                    variant_sizes[FORMAT_LABELS[fmt_key]] = round(total_size / (1024 * 1024), 1)
+                else:
+                    variant_sizes[FORMAT_LABELS[fmt_key]] = round(
+                        path.stat().st_size / (1024 * 1024), 1
+                    )
+            else:
+                variant_sizes[FORMAT_LABELS[fmt_key]] = 0.0
+        sizes[variant] = variant_sizes
+    return sizes
 
 
 def build_variant_cogs():
-    """Create processed COGs (smoothed or median) from the raw COG."""
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-
+    """Create processed COGs (quantized) from the raw COG."""
     cog_raw = FORMAT_PATHS["cog"]["raw"]
     if not cog_raw.exists():
         raise FileNotFoundError(f"Raw COG not found: {cog_raw}")
@@ -378,591 +290,76 @@ def build_variant_cogs():
             print(f"  COG {variant} already exists, skipping")
             continue
 
-        if variant.startswith("s"):
-            variant_type = "s"
-            param = int(variant[1:])
-            print(f"Smoothing COG with sigma={param} (parallel)...")
-        elif variant.startswith("m"):
-            variant_type = "m"
-            param = int(variant[1:])
-            print(f"Applying median filter with size={param} (parallel)...")
+        if variant.startswith("q"):
+            q_val = int(variant[1:])
+            print(f"Applying quantization bucket size={q_val}...")
         else:
             continue
 
         with rasterio.open(cog_raw) as src:
             profile = src.profile.copy()
+            profile.update(dtype=rasterio.int16, nodata=-32768)
             height, width = src.height, src.width
             strip_size = 256
             
-            with Pool(processes=max(1, cpu_count() - 1)) as pool:
-                with rasterio.open(cog_out, "w", **profile) as dst:
-                    # Queue up all strips
-                    tasks = []
-                    windows = []
-                    for y_start in range(0, height, strip_size):
-                        y_end = min(y_start + strip_size, height)
-                        window = Window(0, y_start, width, y_end - y_start)
-                        data = src.read(1, window=window)
-                        tasks.append((data, variant_type, param))
-                        windows.append(window)
-
-                    # Process in parallel with progress bar
-                    results = list(tqdm(
-                        pool.imap(_process_strip_worker, tasks),
-                        total=len(tasks),
-                        desc=f"  {variant} strips",
-                    ))
-
-                    # Write results sequentially
-                    for processed, window in zip(results, windows):
-                        dst.write(processed, indexes=1, window=window)
+            with rasterio.open(cog_out, "w", **profile) as dst:
+                from tqdm import tqdm
+                for y_start in tqdm(range(0, height, strip_size), desc=f"  {variant} strips"):
+                    y_end = min(y_start + strip_size, height)
+                    window = Window(0, y_start, width, y_end - y_start)
+                    data = src.read(1, window=window)
+                    
+                    # Quantize data, ignoring NoData
+                    out_data = np.full(data.shape, -32768, dtype=np.int16)
+                    valid_mask = _valid_data_mask(data, src.nodata)
+                    if valid_mask.any():
+                        out_data[valid_mask] = np.round(data[valid_mask] / float(q_val)) * q_val
+                        
+                    dst.write(out_data, indexes=1, window=window)
 
         size_mb = cog_out.stat().st_size / (1024 * 1024)
         print(f"  Wrote {cog_out.name} ({size_mb:.1f} MB)")
-# ======================================================================
-# Run-length analysis
-# ======================================================================
 
-def analyze_run_lengths():
-    """Analyze run-length characteristics of each COG variant (streaming)."""
-    out_path = TABLES_DIR / "dem_stats.json"
-    if out_path.exists():
-        print(f"DEM stats already exist at {out_path}, skipping analysis")
-        return
-
-    TABLES_DIR.mkdir(parents=True, exist_ok=True)
-    stats = {}
+def build_variant_zarrs():
+    """Create Zarr archives from the COGs."""
+    import xarray as xr
+    import rioxarray
 
     for variant in DATA_VARIANTS:
-        cog_path = FORMAT_PATHS["cog"][variant]
-        if not cog_path.exists():
-            print(f"  WARNING: {variant} COG not found, skipping analysis")
+        zarr_out = FORMAT_PATHS["zarr"][variant]
+        if zarr_out.exists():
+            print(f"  Zarr {variant} already exists, skipping")
             continue
 
-        print(f"Analyzing run lengths for {variant}...")
-        with rasterio.open(cog_path) as src:
-            # Streaming accumulation
-            n_valid = 0
-            vmin = float("inf")
-            vmax = float("-inf")
-            vsum = 0.0
-            vsum2 = 0.0
-
-            total_diffs = 0
-            sum_abs_diff = 0.0
-            changes_raw = 0
-            # Change counts per quantization level
-            changes_q = {0: 0, 1: 0, 5: 0, 10: 0}
-            # Track last value from previous strip for boundary diffs
-            prev_strip_last = None
-
-            strip_size = 256
-            for y_start in range(0, src.height, strip_size):
-                y_end = min(y_start + strip_size, src.height)
-                window = Window(0, y_start, src.width, y_end - y_start)
-                data = src.read(1, window=window)
-
-                # Flatten in row-major order and filter valid
-                flat = data.ravel()
-                valid = flat[np.isfinite(flat)]
-                if len(valid) == 0:
-                    continue
-
-                n_valid += len(valid)
-                vmin = min(vmin, float(valid.min()))
-                vmax = max(vmax, float(valid.max()))
-                vsum += float(valid.sum())
-                vsum2 += float((valid * valid).sum())
-
-                # Within-strip diffs
-                strip_diffs = np.abs(np.diff(valid))
-                total_diffs += len(strip_diffs)
-                sum_abs_diff += float(strip_diffs.sum())
-                changes_raw += int(np.sum(strip_diffs > 0))
-
-                for quant in [0, 1, 5, 10]:
-                    if quant == 0:
-                        q_valid = valid
-                    else:
-                        q_valid = np.round(valid / quant) * quant
-                    q_diffs = np.abs(np.diff(q_valid))
-                    changes_q[quant] += int(np.sum(q_diffs > 0))
-
-                # Boundary diff to previous strip
-                if prev_strip_last is not None and len(valid) > 0:
-                    boundary_diff = abs(float(prev_strip_last) - float(valid[0]))
-                    total_diffs += 1
-                    sum_abs_diff += boundary_diff
-                    if boundary_diff > 0:
-                        changes_raw += 1
-                    for quant in [0, 1, 5, 10]:
-                        if quant == 0:
-                            a, b = float(prev_strip_last), float(valid[0])
-                        else:
-                            a = round(float(prev_strip_last) / quant) * quant
-                            b = round(float(valid[0]) / quant) * quant
-                        if a != b:
-                            changes_q[quant] += 1
-
-                prev_strip_last = valid[-1]
-
-            if n_valid == 0:
-                continue
-
-            mean = vsum / n_valid
-            variance = max(0, vsum2 / n_valid - mean * mean)
-
-            run_lengths = {}
-            for quant in [0, 1, 5, 10]:
-                qc = changes_q[quant]
-                if qc > 0 and total_diffs > 0:
-                    mean_run = n_valid / qc
-                else:
-                    mean_run = n_valid
-                run_lengths[f"{quant}m"] = {
-                    "changes": qc,
-                    "change_pct": round(qc / total_diffs * 100, 1) if total_diffs > 0 else 0.0,
-                    "mean_run_length": round(mean_run, 1),
-                }
-
-            stats[variant] = {
-                "pixels": n_valid,
-                "min_elevation": round(vmin, 1),
-                "max_elevation": round(vmax, 1),
-                "mean_elevation": round(mean, 1),
-                "std_elevation": round(float(np.sqrt(variance)), 1),
-                "mean_abs_diff": round(sum_abs_diff / total_diffs, 3) if total_diffs > 0 else 0.0,
-                "pct_changes": round(changes_raw / total_diffs * 100, 1) if total_diffs > 0 else 0.0,
-                "run_lengths": run_lengths,
-            }
-            print(f"  {variant}: {n_valid:,} pixels, mean={mean:.1f}m, "
-                  f"mean_abs_diff={stats[variant]['mean_abs_diff']:.3f}m")
-
-    out_path.write_text(json.dumps(stats, indent=2) + "\n")
-    print(f"Saved run-length analysis to {out_path}")
-
-
-# ======================================================================
-# Parquet writers — streaming, Hilbert-sorted, delta-encoded
-# ======================================================================
-
-def _write_batches_to_parquet(batches_iter, output_path, schema_override=None):
-    """Stream PyArrow tables to a Parquet file with delta encoding.
-
-    Uses DELTA_BINARY_PACKED for integer columns (band_value as int32,
-    s2_cell, h3_cell) for maximum compression on sorted data.
-    """
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-
-    started = time.time()
-    writer = None
-    try:
-        for tbl in batches_iter:
-            if writer is None:
-                schema = schema_override or tbl.schema
-                col_encoding = {}
-                for field in schema:
-                    if pa.types.is_integer(field.type):
-                        col_encoding[field.name] = "DELTA_BINARY_PACKED"
-                writer = pq.ParquetWriter(
-                    str(output_path), schema,
-                    compression="zstd",
-                    compression_level=15,
-                    use_dictionary=False,
-                    column_encoding=col_encoding,
-                    write_statistics=True,
-                )
-            writer.write_table(tbl)
-    finally:
-        if writer is not None:
-            writer.close()
-    if writer is None:
-        raise ValueError("no batches to write")
-
-    elapsed = time.time() - started
-    row_count = pq.ParquetFile(str(output_path)).metadata.num_rows
-    size_mb = output_path.stat().st_size / (1024 * 1024)
-    return row_count, size_mb, elapsed
-
-
-# ---------------------------------------------------------------------------
-# Flat Parquet (Hilbert-sorted, x / y / band_value as int32 delta)
-# ---------------------------------------------------------------------------
-
-def _build_flat(variant: str):
-    """Build flat Parquet: for non-raw variants, reuse x/y from raw and sample band_value from smoothed COG."""
-    import pyarrow.parquet as pq
-
-    output_path = FORMAT_PATHS["parquet_flat"][variant]
-    if _is_parquet_valid(output_path):
-        print(f"  flat ({variant}): already exists, skipping")
-        return
-
-    if variant == "raw":
-        cog_path = FORMAT_PATHS["cog"]["raw"]
-        print(f"  flat (raw): extracting from {cog_path.name}...")
-
-        def _batch_generator():
-            yield from _iter_cog_arrow_batches(cog_path, strip_size=256, sort_hilbert=True)
-
-        row_count, size_mb, elapsed = _write_batches_to_parquet(_batch_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
-    else:
-        print(f"  flat ({variant}): reusing x/y from raw flat, sampling band_value from COG...")
-        raw_flat_path = FORMAT_PATHS["parquet_flat"]["raw"]
-        if not raw_flat_path.exists():
-            _build_flat("raw")
-
         cog_path = FORMAT_PATHS["cog"][variant]
-        raw_pf = pq.ParquetFile(str(raw_flat_path))
-
-        def _sample_generator():
-            with rasterio.open(cog_path) as src:
-                for batch in raw_pf.iter_batches(batch_size=500_000):
-                    x_arr = batch.column("x").to_numpy()
-                    y_arr = batch.column("y").to_numpy()
-                    band_values = _sample_band_values_for_xy(src, x_arr, y_arr)
-                    yield _arrays_to_arrow_table({
-                        "x": x_arr,
-                        "y": y_arr,
-                        "band_value": band_values,
-                    })
-
-        row_count, size_mb, elapsed = _write_batches_to_parquet(_sample_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
-
-
-# ---------------------------------------------------------------------------
-# S2 Parquet (Hilbert-sorted by s2_cell, x / y / band_value / s2_cell)
-# ---------------------------------------------------------------------------
-
-def _build_s2(variant: str):
-    """Build S2 Parquet: for non-raw variants, reuse s2_cell from raw variant."""
-    import pyarrow.parquet as pq
-
-    output_path = FORMAT_PATHS["parquet_s2"][variant]
-    if _is_parquet_valid(output_path):
-        size_mb = output_path.stat().st_size / (1024 * 1024)
-        print(f"  s2   ({variant}): already exists ({size_mb:.1f} MB), skipping")
-        return
-
-    if variant == "raw":
-        flat_path = FORMAT_PATHS["parquet_flat"][variant]
-        if not flat_path.exists():
-            _build_flat(variant)
-
-        # Compute s2 cells in parallel
-        import s2cell as _s2
-        print(f"  s2   ({variant}): computing S2 cells (parallel) and sorting...")
-        pf = pq.ParquetFile(str(flat_path))
-        batch_idx = 0
-        processed = 0
-        assign_timer = _StageTimer("s2 assignment")
-        sort_timer = _StageTimer("s2 sort/table")
-        n_procs = max(1, cpu_count() - 1)
-
-        def _batch_generator():
-            nonlocal batch_idx, processed
-            with Pool(processes=n_procs) as pool:
-                for batch in pf.iter_batches(batch_size=1_000_000):
-                    x_col = batch.column("x").to_numpy()
-                    y_col = batch.column("y").to_numpy()
-                    val_col = batch.column("band_value").to_numpy()
-                    n = len(x_col)
-
-                    with assign_timer:
-                        # Split batch into chunks for workers
-                        chunk_size = (n + n_procs - 1) // n_procs
-                        chunks = [
-                            (y_col[i:i+chunk_size], x_col[i:i+chunk_size], S2_LEVEL)
-                            for i in range(0, n, chunk_size)
-                        ]
-                        results = pool.map(_s2_worker, chunks)
-                        s2_cells = np.concatenate(results)
-
-                    with sort_timer:
-                        tbl = _cell_table_sorted(
-                            x_col,
-                            y_col,
-                            val_col.astype(np.int32, copy=False),
-                            s2_cells,
-                            "s2_cell",
-                        )
-                    processed += len(tbl)
-                    batch_idx += 1
-                    if batch_idx % 25 == 0:
-                        print(f"    batch {batch_idx}: {processed:,} rows")
-                    yield tbl
-
-        row_count, size_mb, elapsed = _write_batches_to_parquet(_batch_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
-        print(f"    s2 assignment: {assign_timer.elapsed:.1f}s; sort/table: {sort_timer.elapsed:.1f}s")
-    else:
-        # Reuse s2_cell from raw variant — S2 cell depends only on (x,y), not elevation
-        print(f"  s2   ({variant}): reusing s2_cell from raw, swapping band_value...")
-        raw_s2_path = FORMAT_PATHS["parquet_s2"]["raw"]
-        if not raw_s2_path.exists():
-            _build_s2("raw")
-
-        cog_path = FORMAT_PATHS["cog"][variant]
-        raw_pf = pq.ParquetFile(str(raw_s2_path))
-
-        def _reuse_generator():
-            yield from _iter_indexed_variant_batches(raw_pf, cog_path, "s2_cell")
-
-        row_count, size_mb, elapsed = _write_batches_to_parquet(_reuse_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
-
-
-# ---------------------------------------------------------------------------
-# H3 Parquet (sorted by h3_cell, x / y / band_value / h3_cell as uint64)
-# ---------------------------------------------------------------------------
-
-def _build_h3(variant: str):
-    """Build H3 Parquet: for non-raw variants, reuse h3_cell from raw variant."""
-    import pyarrow.parquet as pq
-
-    output_path = FORMAT_PATHS["parquet_h3"][variant]
-    if _is_parquet_valid(output_path):
-        size_mb = output_path.stat().st_size / (1024 * 1024)
-        print(f"  h3   ({variant}): already exists ({size_mb:.1f} MB), skipping")
-        return
-
-    if variant == "raw":
-        flat_path = FORMAT_PATHS["parquet_flat"][variant]
-        if not flat_path.exists():
-            _build_flat(variant)
-
-        # Compute h3 cells in parallel
-        import h3.api.numpy_int as h3_mod
-        print(f"  h3   ({variant}): computing H3 cells (parallel) and sorting...")
-        pf = pq.ParquetFile(str(flat_path))
-        batch_idx = 0
-        processed = 0
-        assign_timer = _StageTimer("h3 assignment")
-        sort_timer = _StageTimer("h3 sort/table")
-        n_procs = max(1, cpu_count() - 1)
-
-        def _batch_generator():
-            nonlocal batch_idx, processed
-            with Pool(processes=n_procs) as pool:
-                for batch in pf.iter_batches(batch_size=1_000_000):
-                    x_col = batch.column("x").to_numpy()
-                    y_col = batch.column("y").to_numpy()
-                    val_col = batch.column("band_value").to_numpy()
-                    n = len(x_col)
-
-                    with assign_timer:
-                        chunk_size = (n + n_procs - 1) // n_procs
-                        chunks = [
-                            (y_col[i:i+chunk_size], x_col[i:i+chunk_size], H3_RESOLUTION)
-                            for i in range(0, n, chunk_size)
-                        ]
-                        results = pool.map(_h3_worker, chunks)
-                        cells = np.concatenate(results)
-
-                    with sort_timer:
-                        tbl = _cell_table_sorted(
-                            x_col,
-                            y_col,
-                            val_col.astype(np.int32, copy=False),
-                            cells,
-                            "h3_cell",
-                        )
-                    processed += len(tbl)
-                    batch_idx += 1
-                    if batch_idx % 25 == 0:
-                        print(f"    batch {batch_idx}: {processed:,} rows")
-                    yield tbl
-
-        row_count, size_mb, elapsed = _write_batches_to_parquet(_batch_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
-        print(f"    h3 assignment: {assign_timer.elapsed:.1f}s; sort/table: {sort_timer.elapsed:.1f}s")
-    else:
-        print(f"  h3   ({variant}): reusing h3_cell from raw, swapping band_value...")
-        raw_h3_path = FORMAT_PATHS["parquet_h3"]["raw"]
-        if not raw_h3_path.exists():
-            _build_h3("raw")
-
-        cog_path = FORMAT_PATHS["cog"][variant]
-        raw_pf = pq.ParquetFile(str(raw_h3_path))
-
-        def _reuse_generator():
-            yield from _iter_indexed_variant_batches(raw_pf, cog_path, "h3_cell")
-
-        row_count, size_mb, elapsed = _write_batches_to_parquet(_reuse_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
-
-
-# ---------------------------------------------------------------------------
-# GeoParquet (Hilbert-sorted, geometry / band_value)
-# ---------------------------------------------------------------------------
-
-def _build_geoparquet(variant: str):
-    """Build GeoParquet: for non-raw variants, reuse geometry from raw variant."""
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-
-    output_path = FORMAT_PATHS["geoparquet"][variant]
-    if _is_parquet_valid(output_path):
-        size_mb = output_path.stat().st_size / (1024 * 1024)
-        print(f"  geo  ({variant}): already exists ({size_mb:.1f} MB), skipping")
-        return
-
-    if variant == "raw":
-        from shapely import points as shapely_points
-        import geopandas as gpd
-
-        flat_path = FORMAT_PATHS["parquet_flat"]["raw"]
-        if not flat_path.exists():
-            _build_flat("raw")
-
-        print(f"  geo  (raw): writing GeoParquet...")
-        pf = pq.ParquetFile(str(flat_path))
-        chunk_num = 0
-        total = 0
-
-        temp_dir = DATA_DIR / "_geo_chunks_raw"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        geo_chunk_files = []
-
-        for batch in pf.iter_batches(batch_size=500_000):
-            x_arr = batch.column("x").to_numpy()
-            y_arr = batch.column("y").to_numpy()
-            val_arr = batch.column("band_value").to_numpy()
-
-            df_chunk = pd.DataFrame({
-                "x": x_arr, "y": y_arr, "band_value": val_arr,
-            })
-            df_chunk = sort_by_hilbert(df_chunk)
-
-            geometry = shapely_points(df_chunk["x"].values, df_chunk["y"].values)
-            gdf_chunk = gpd.GeoDataFrame(
-                {"band_value": df_chunk["band_value"].values},
-                geometry=geometry, crs="EPSG:4326",
-            )
-            chunk_path = temp_dir / f"chunk_{chunk_num:06d}.parquet"
-            gdf_chunk.to_parquet(chunk_path, compression="zstd", index=False)
-            geo_chunk_files.append(chunk_path)
-            total += len(gdf_chunk)
-            chunk_num += 1
-            if chunk_num % 50 == 0:
-                print(f"    chunk {chunk_num}: {total:,} rows")
-
-        print(f"    merging {len(geo_chunk_files)} chunks...")
-        first = pq.read_table(str(geo_chunk_files[0]))
-        with pq.ParquetWriter(
-            str(output_path), first.schema,
-            compression="zstd", compression_level=6,
-            use_dictionary=True, write_statistics=True,
-        ) as writer:
-            writer.write_table(first)
-            for cf in geo_chunk_files[1:]:
-                writer.write_table(pq.read_table(str(cf)))
-
-        for cf in geo_chunk_files:
-            cf.unlink()
-        temp_dir.rmdir()
-
-        row_count = pq.ParquetFile(str(output_path)).metadata.num_rows
-        size_mb = output_path.stat().st_size / (1024 * 1024)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB)")
-    else:
-        print(f"  geo  ({variant}): reusing geometry from raw, swapping band_value...")
-        raw_geo_path = FORMAT_PATHS["geoparquet"]["raw"]
-        if not raw_geo_path.exists():
-            _build_geoparquet("raw")
-
-        flat_path = FORMAT_PATHS["parquet_flat"][variant]
-        if not flat_path.exists():
-            _build_flat(variant)
-
-        raw_pf = pq.ParquetFile(str(raw_geo_path))
-        flat_pf = pq.ParquetFile(str(flat_path))
-        geo_field = raw_pf.schema_arrow.field("geometry")
-        out_schema = pa.schema([
-            pa.field("band_value", pa.int32()),
-            geo_field,
-        ])
-
-        def _reuse_generator():
-            for raw_batch, flat_batch in zip(
-                raw_pf.iter_batches(batch_size=500_000),
-                flat_pf.iter_batches(batch_size=500_000),
-            ):
-                yield pa.table({
-                    "band_value": flat_batch.column("band_value"),
-                    "geometry": raw_batch.column("geometry"),
-                }, schema=out_schema)
-
-        row_count, size_mb, elapsed = _write_batches_to_parquet(_reuse_generator(), output_path)
-        print(f"    wrote {row_count:,} rows ({size_mb:.1f} MB) in {elapsed:.1f}s")
-
-
-# ======================================================================
-# Reporting
-# ======================================================================
-
-def record_file_sizes():
-    sizes = {}
-    for variant in DATA_VARIANTS:
-        variant_sizes = {}
-        for fmt_key, fmt_paths in FORMAT_PATHS.items():
-            path = fmt_paths[variant]
-            if path.exists():
-                variant_sizes[FORMAT_LABELS[fmt_key]] = round(
-                    path.stat().st_size / (1024 * 1024), 1
-                )
-            else:
-                variant_sizes[FORMAT_LABELS[fmt_key]] = 0.0
-        sizes[variant] = variant_sizes
-    return sizes
-
-
-# ======================================================================
-# Main
-# ======================================================================
+        print(f"  [{variant}] writing zarr...")
+        
+        # Open COG with rioxarray in chunks to avoid blowing up memory
+        da = rioxarray.open_rasterio(cog_path, chunks={"x": 512, "y": 512})
+        # Zarr recommends not having spatial dimensions in the chunking to be overly complex if not needed,
+        # but matching the COG chunking (512x512) is a good start.
+        da.to_zarr(zarr_out, mode="w", compute=True)
 
 def main():
     print("=== Stage 1: Data Preparation ===")
     t0 = time.time()
 
-    # 1. Download raw COG
     download_copernicus_dem()
-
-    # 2. Build variant COGs (smoothed/median)
     build_variant_cogs()
+    build_variant_zarrs()
+    base_raw_path = _create_base_parquet()
 
-    # 3. Run-length analysis
-    analyze_run_lengths()
-
-    # 4. Build all parquet variants
     for variant in DATA_VARIANTS:
         print(f"\n--- Variant: {variant} ---")
-        _build_flat(variant)
-        _build_s2(variant)
-        _build_h3(variant)
-        _build_geoparquet(variant)
+        build_duckdb_variants(variant, base_raw_path)
+        build_zorder_variant(variant, base_raw_path)
 
-    # 5. Report
     sizes = record_file_sizes()
     print("\nFile sizes:")
     for variant in DATA_VARIANTS:
         print(f"  [{variant}]")
         for name, size_mb in sizes[variant].items():
             print(f"    {name}: {size_mb:.1f} MB")
-
-    missing = []
-    for variant in DATA_VARIANTS:
-        for fmt_paths in FORMAT_PATHS.values():
-            p = fmt_paths[variant]
-            if not p.exists():
-                missing.append(str(p))
-    if missing:
-        print(f"\nWARNING: {len(missing)} missing files")
-        for p in missing:
-            print(f"  - {p}")
 
     elapsed = time.time() - t0
     print(f"\nData prep complete in {elapsed:.0f}s")
