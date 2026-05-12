@@ -1,157 +1,86 @@
 ---
-title: "How to Query a Massive DEM on 8GB of RAM"
+title: "How to Query a Global Multi-Dimensional Hazard Dataset"
 date: "2026-05-10"
-tags: [geospatial, python, benchmarking, duckdb, polars]
-description: "Benchmarking COG, Parquet+S2, Parquet+H3, and GeoParquet against DuckDB, Rasterio, Polars, and more — on a MacBook Air with 8GB RAM."
+tags: [geospatial, python, rust, zarr, polars, benchmarking]
+description: "Benchmarking the architectural evolution required to synchronously query massive polygon batches against global, multi-dimensional hazard datasets."
 ---
 
-## The Problem
+## 1. The Global Problem Context
 
-You've got a Copernicus 30m DEM covering a 6°×6° region — roughly 466.6M pixels and 11.7GB uncompressed. You're on a MacBook Air with 8GB of RAM. How do you actually query this thing?
+**The Reality:** The production requirement is a global 30m dataset over land, characterized by long run-lengths (smooth climate/hazard data). 
 
-Most people reach for `rioxarray.open_rasterio()` and immediately OOM. But there are better ways — if you pick the right format and tool for your access pattern.
+**The Dimensionality:** The data is hyper-dimensional: 12 years × 4 scenarios × 5 return periods × 3 percentiles = 720 distinct layers per spatial pixel. 
+
+**The Constraint:** The API must execute synchronous, low-latency extractions for batches of up to 100,000 irregular polygons.
+
+**The Proxy Benchmark:** To empirically test architectures, we use a 6°×6° Copernicus DEM (1.7GB, ~466M pixels) quantized to `q2500`. This perfectly simulates the smooth, blocky nature of the global hazard data while allowing rigorous, reproducible micro-benchmarking.
 
 <Callout type="info">
-**TL;DR:** For point queries on low-memory hardware, Parquet + S2 indexing with Polars wins. For bbox reads, stick with COG + Rasterio. For polygon queries, DuckDB + GeoParquet is the sweet spot. Never read the full raster into memory.
+**TL;DR:** For massive batch extraction of 100K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides the optimal balance of storage compression, analytical accuracy, and sub-second synchronous API performance.
 </Callout>
 
-## The Setup
+## 2. The Baseline: Sequential Raster Masking
 
-**Region:** Copernicus GLO-30 DEM, 6°×6° (Swiss Alps + northern Italy)
-**Hardware:** M1 Mac, 8GB RAM — no swap allowed for benchmarking
-**Resolution:** 30m (~22,000 × 22,000 pixels)
+**The Approach:** Standard GDAL/Rasterio pipeline against a Cloud Optimized GeoTIFF (COG).
 
-### Formats tested
+**The Result:** The COG compresses beautifully (9.7 MB), but sequential raster masking is an $O(N)$ operation over geometries.
 
-| Format | Description |
-|--------|-------------|
-| COG | Cloud Optimized GeoTIFF with internal overviews and tiling |
-| Parquet (flat) | Row-per-pixel: `x, y, band_value` columns |
-| Parquet + S2 | Flat + `s2_cell` column at level 14 (~0.03 km²) |
-| Parquet + H3 | Flat + `h3_cell` column at resolution 12 (~0.03 km²) |
-| GeoParquet | Row-per-pixel with native `geometry` (POINT) column |
+**The Bottleneck:** Extracting 100,000 polygons via Rasterio takes ~181 seconds (over 3 minutes). While excellent for single point lookups or notebooks, this linear scaling fails synchronous Web API constraints.
 
-### Tools tested
-
-| Tool | What it reads |
-|------|---------------|
-| **Rasterio** | COG only — purpose-built for windowed reads |
-| **rioxarray** | COG only — lazy xarray wrapper around Rasterio |
-| **DuckDB** | Everything — COG via `ST_Read()`, Parquet natively, GeoParquet via spatial ext |
-| **Polars** | Parquet variants only — fastest pure-Python Parquet engine |
-| **pandas** | Parquet variants only — baseline comparison |
-| **GeoPandas** | GeoParquet only — canonical spatial DataFrame reader |
-
-### Query types
-
-- **Point sample:** Elevation at 100 random lat/lon coordinates
-- **Bbox window:** 0.01°×0.01° window (~1.1 km × 1.1 km)
-- **Polygon:** Irregular polygon ~0.02° across (simulated catchment boundary)
-
-Each combination ran **10 times**, profiled with [memray](https://github.com/bloomberg/memray) for precise heap allocation tracking.
-
-## Storage Size: What You Pay on Disk
+## 3. The Relational Pivot: Tabular Joins & Quadtree Compaction
 
 ![Storage size by format](/plots/01_storage_size.png)
 
-| Format | Size |
-|--------|------|
-| COG | 1749.6 MB |
-| Parquet (flat) | 1889.2 MB |
-| Parquet + S2 | 2238.9 MB |
-| Parquet + H3 | 3064.7 MB |
-| GeoParquet | 2994.6 MB |
+**The Approach:** Converting the spatial problem into a relational database problem by utilizing a Native 2D Hilbert Curve and dropping explicit coordinates to save space (avoiding the "Coordinate Tax").
 
-The COG is naturally compact — it's a raster. The Parquet variants inflate because every pixel becomes a row with multiple columns. S2 and H3 add an integer column each, and GeoParquet adds a WKB geometry blob per row.
+**Quadtree Compaction:** Because the hazard data proxy is smooth, identical 30m child pixels are recursively merged into larger parent cells (up to 16 levels).
 
-The trade-off: you pay more on disk for faster queries. Whether that's worth it depends on your access pattern.
+**The Results:**
+*   The Parquet file shrinks dramatically to **2.8 MB**.
+*   The Database Query (the $O(\log N)$ Hash Join) processes 100,000 polygons in 11–19 seconds.
+*   However, the geometric preprocessing (the "Covering" step) still scales linearly, dragging total execution time to ~40 seconds.
 
-## Point Query Performance
+![Polygon Scaling](/plots/05_scaling_polygons.png)
 
-![Point query scatter](/plots/02_point_scatter.png)
+## 4. The Area-Weighting Trade-off
 
+**The Limitation:** Quadtree Compaction fundamentally alters `AVG()` aggregations. A large, compacted flat area is reduced to a single row, skewing standard SQL averages when combined with uncompacted noisy edge pixels.
 
-- **Winner:** COG + Rasterio — median 119.7ms, 130.7MB peak
+**The Analytical Solution:** 
+*   **For `MAX()` or `MIN()` queries** (e.g., peak flood depth), the 2.8 MB Compacted Parquet is mathematically robust. 
+*   **For rigorous `AVG()` polygon analytics**, an Uncompacted Hilbert Parquet is required. This avoids the boundary area-weighting flaw of Quadtree Compaction. It still compresses to ~319 MB via Parquet's native ZSTD/RLE, ensuring every pixel retains equal weight.
 
-- **Winner:** COG + rioxarray — median 183.1ms, 143.4MB peak
+## 5. Native Zarr Integration
 
-- **Winner:** Parquet + S2 + Polars — median 310.6ms, 181.6MB peak
+**The Ecosystem Assessment:** Zarr provides excellent compression (9.8 MB), but standard Python bindings (`xarray` / `rioxarray`) introduce significant overhead for surgical polygon masking, failing at 110s for just 100 polygons.
 
+**The Rust Implementation:** Bypassing the Python GIL, we implement a custom PyO3 plugin using the pure-Rust `zarrs` crate, `geo-rasterize`, and `rayon` for parallel processing.
 
-Point queries are where the S2/H3-indexed Parquet files shine. The spatial index collapses a 2D lookup into a single integer filter: `WHERE s2_cell = 12345678`. Every Parquet engine handles this lightning-fast.
+**The Performance:** Operating directly on the raw chunked bytes natively in Rust, the pipeline extracts 100,000 polygons in **1.57 seconds**. Because it operates on raw pixels, it maintains GDAL-level mathematical accuracy for area-weighting without the Parquet boundary paradox.
 
-COG + Rasterio is competitive for single points (`.sample()` is efficient), but degrades at scale because each point opens a new read context.
+## 6. Scaling Back to the Globe (Conclusion)
 
-## Bbox Window Performance
+**Applying the Lessons:** Returning to the original multi-dimensional problem (720 layers per spatial pixel).
 
-![Bbox scatter](/plots/03_bbox_scatter.png)
+**Why Rust+Zarr Wins at Scale:** Parquet schemas struggle with 720-layer hyper-dimensionality, whereas Zarr natively handles N-dimensional chunking (`[layer, y, x]`). 
 
-Bbox reads are COG's native territory. Rasterio's windowed read (`src.read(1, window=from_bounds(...))`) pulls exactly the pixels needed from the internal tiles. DuckDB on COG is also strong here.
+**Storage Constraints:** Zarr v2 generates millions of chunk files, causing S3 bottlenecks. The solution is **Zarr v3 Sharding**, which packs thousands of chunks into single files.
 
-The Parquet variants require filtering on the index column, which is fast but scanning millions of matching rows still costs memory.
-
-## Polygon Query Performance
-
-![Polygon scatter](/plots/04_polygon_scatter.png)
-
-For irregular polygons, the S2/H3 approach pre-computes which cell IDs intersect the polygon, then does an integer `IN (...)` filter. This is a win because the spatial logic happens once before the query, not during it.
-
-DuckDB + GeoParquet uses a proper spatial predicate (`ST_Within`) which is cleaner code but slightly slower on 8GB.
-
-## What's Eating the Memory?
-
-![Memray flame graph](/plots/02_point_flamegraph.png)
-
-Memray flame graphs reveal where allocations actually go:
-
-- **COG + Rasterio:** Most memory is in GDAL's C-level block cache — invisible to Python but real RSS. GDAL reads decompressed tiles into its internal cache.
-- **Polars + Parquet:** Allocations are in Rust/Polars' Arrow buffers — well-managed, predictable chunks.
-- **DuckDB + COG:** Heavy overhead from converting raster bands to row format inside the spatial extension.
-- **pandas + Parquet:** Python object overhead from loading the full DataFrame column into memory.
-
-## The Full Picture
-
-![Combined scatter](/plots/05_combined_scatter.png)
-
-The dashed line is the **Pareto frontier** — combinations that are both fast and memory-efficient. Points hugging the bottom-left corner are the ones that "just work" on 8GB.
-
-## Decision Guide
-
-![Decision heatmap](/plots/06_decision_heatmap.png)
-
-| Your use case | Use this | Why |
-|---------------|----------|-----|
-| **Point queries, many of them** | Parquet + S2 with Polars | Integer filter on pre-computed cell ID, zero spatial overhead at query time |
-| **Bbox reads, raster output** | COG + Rasterio | Purpose-built windowed reads, internal tiling, no format conversion needed |
-| **Polygon queries, tabular output** | Parquet + H3 with DuckDB | Pre-computed cell covering + fast Parquet reader |
-| **Mixed spatial + tabular queries** | GeoParquet + DuckDB | Full SQL with spatial predicates, no pre-computation needed |
-| **Lazy exploration in Python** | COG + rioxarray (with `chunks=`) | Familiar xarray API, only loads what you `.sel()` |
-| **You already have a COG, don't convert** | COG + Rasterio for bboxes, COG + DuckDB for points | Avoid the conversion cost |
-
-## What We Didn't Test
-
-- **Multi-band imagery** (Sentinel-2, Landsat) — the Parquet row-per-band approach would multiply storage further
-- **Dask clusters** — if you have a cluster, COG + rioxarray + Dask's lazy parallelism is hard to beat
-- **Full-extent reads** — if you genuinely need the entire DEM in memory, none of these formats help; you need more RAM or a tiled processing approach
-- **The risks of massive VRTs** — [coming in a follow-up post](/blog/vrt-risks)
+**Final Verdict:** A pure-Rust backend querying sharded N-dimensional Zarr arrays provides the optimal balance of storage compression, analytical accuracy, and sub-second synchronous API performance for global hazard data.
 
 ## Reproduce This
 
 All scripts are at `github.com/dnf0/dem-format-benchmark`. Change `config.py` to point at your own region and run:
 
 ```bash
-python scripts/data_prep.py
-python scripts/benchmark.py
-python scripts/visualize.py
+uv run python scripts/data_prep.py
+uv run python scripts/benchmark.py
+uv run python scripts/visualize.py
 ```
-
-The benchmark harness is format- and tool-agnostic — add your own by extending `config.BENCHMARK_COMBOS`.
 
 ## References
 
 - [Copernicus GLO-30 DEM](https://spacedata.copernicus.eu/collections/copernicus-digital-elevation-model)
 - [Cloud Optimized GeoTIFF specification](https://www.cogeo.org/)
-- [GeoParquet specification](https://geoparquet.org/)
-- [S2 Geometry](http://s2geometry.io/)
-- [H3 Spatial Index](https://h3geo.org/)
-- [memray memory profiler](https://github.com/bloomberg/memray)
+- [Zarr Storage Format](https://zarr.dev/)
+- [geo-rasterize Rust Crate](https://crates.io/crates/geo-rasterize)
