@@ -53,3 +53,14 @@ def build_zarr(cog_dir: str, out_path: str):
     # create a 1000x1000 array chunked 100x100
     z = root.zeros('data', shape=(1000, 1000), chunks=(100, 100), dtype='i4')
     z[:] = 42
+
+from kerchunk.tiff import tiff_to_zarr
+import ujson
+
+def build_kerchunk(cog_dir: str, out_path: str):
+    cogs = glob.glob(os.path.join(cog_dir, "*.tif"))
+    # For the mock benchmark, generating a single reference is sufficient
+    # to test the ReferenceFileSystem + Zarr overhead.
+    out = tiff_to_zarr(cogs[0])
+    with open(out_path, "wb") as f:
+        f.write(ujson.dumps(out).encode())

@@ -24,11 +24,16 @@ def dataset(tmp_path_factory):
     zarr_path = dir_path / "data.zarr"
     build_zarr(str(cog_dir), str(zarr_path))
     
+    from .data_gen import build_kerchunk
+    kc_path = dir_path / "kerchunk.json"
+    build_kerchunk(str(cog_dir), str(kc_path))
+
     return {
         "vrt": str(vrt_path),
         "parquet": str(pq_path),
         "cogs": str(cog_dir),
-        "zarr": str(zarr_path)
+        "zarr": str(zarr_path),
+        "kerchunk": str(kc_path)
     }
 
 def test_bench_global_vrt(benchmark, dataset):
@@ -103,6 +108,22 @@ def test_bench_zarr(benchmark, dataset):
         root = zarr.group(store=store)
         data = root['data'][450:550, 450:550]
         return data
+
+    result = benchmark(run_read)
+    assert result is not None
+
+import fsspec
+import xarray as xr
+
+def test_bench_kerchunk(benchmark, dataset):
+    def run_read():
+        fs = fsspec.filesystem(
+            "reference", fo=dataset["kerchunk"], remote_protocol="file"
+        )
+        m = fs.get_mapper("")
+        z = zarr.open(m, mode="r")
+        # Mock spatial read by pulling a slice
+        return z[45:55, 45:55]
 
     result = benchmark(run_read)
     assert result is not None

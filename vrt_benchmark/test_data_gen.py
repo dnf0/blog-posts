@@ -32,3 +32,14 @@ def test_build_zarr(tmp_path):
     zarr_path = tmp_path / "data.zarr"
     build_zarr(str(cog_dir), str(zarr_path))
     assert zarr_path.exists()
+
+from .data_gen import build_kerchunk
+
+def test_build_kerchunk(tmp_path):
+    cog_dir = tmp_path / "cogs"
+    cog_dir.mkdir()
+    generate_cogs(str(cog_dir), grid_size=2)
+    
+    kc_path = tmp_path / "index.json"
+    build_kerchunk(str(cog_dir), str(kc_path))
+    assert kc_path.exists()
