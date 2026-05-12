@@ -14,7 +14,22 @@ Global VRTs degrade at scale due to XML parsing overhead and memory bloat.
 - STAC + TiTiler
 
 # Benchmark Results
-(Results will be pasted here after running memray and pytest-benchmark)
+Here are the empirical wall-clock results running our python harness:
+
+```text
+-------------------------------------------------------- benchmark: 6 tests -------------------------------------------------------
+Name (time in us)                        Min                     Max                   Mean                StdDev            Rounds
+-----------------------------------------------------------------------------------------------------------------------------------
+test_bench_kerchunk                 128.0000 (1.0)          186.8330 (1.0)         139.3979 (1.0)         13.2390 (1.02)         20
+test_bench_zarr                     228.6670 (1.79)         280.6660 (1.50)        245.9548 (1.76)        12.9853 (1.0)          83
+test_bench_global_vrt             2,562.8340 (20.02)      3,245.1660 (17.37)     2,813.5368 (20.18)      195.9728 (15.09)        17
+test_bench_geoparquet_direct      6,936.8330 (54.19)      8,415.6670 (45.04)     7,318.5780 (52.50)      280.5087 (21.60)       107
+test_bench_titiler               52,570.8330 (410.71)    57,593.4170 (308.26)   55,774.9629 (400.11)   1,656.4075 (127.56)       18
+test_bench_local_vrt             95,306.7920 (744.58)   101,176.9170 (541.54)   97,305.5586 (698.04)   2,298.0900 (176.98)        5
+-----------------------------------------------------------------------------------------------------------------------------------
+```
+
+Kerchunk and Zarr bypass the massive overhead of dynamic parsing or large XML structures and are orders of magnitude faster than building a local VRT.
 
 # Conclusion
 Decision matrix on which architecture to use.
