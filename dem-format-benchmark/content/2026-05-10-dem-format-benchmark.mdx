@@ -11,7 +11,11 @@ Now, multiply that by the dimensionality of climate modeling: 12 different years
 
 Your constraint? The API must execute synchronous, low-latency extractions for batches of up to **100,000 irregular polygons** at a time. If a user draws 100,000 catchments or property boundaries on a map, they expect the hazard analytics back in seconds, not hours.
 
-To empirically test architectures for this colossal challenge without blowing our cloud budget, we need a manageable proxy. In this post, we use a 6°×6° Copernicus Digital Elevation Model (DEM) covering the Swiss Alps (1.7GB, ~466M pixels). By applying a `q2500` quantization (rounding elevations into 2,500m buckets), we artificially transform the noisy mountain terrain into massive, uniform blocks. This perfectly simulates the smooth, categorical nature of global hazard data (like flood models or climate bands), allowing us to rigorously benchmark how different formats handle extreme spatial scaling.
+To empirically test architectures for this colossal challenge without blowing our cloud budget, we need a manageable proxy. In this post, we use a 6°×6° Copernicus Digital Elevation Model (DEM) covering the Swiss Alps (1.7GB, ~466M pixels). By applying a `q2500` quantization (rounding elevations into 2,500m buckets), we artificially transform the noisy mountain terrain into massive, uniform blocks. 
+
+![Quantization Comparison](/plots/00_quantization_visual.png)
+
+This perfectly simulates the smooth, categorical nature of global hazard data (like flood models or climate bands), allowing us to rigorously benchmark how different formats handle extreme spatial scaling.
 
 <Callout type="info">
 **TL;DR:** For massive batch extraction of 100K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides the optimal balance of storage compression, analytical accuracy, and sub-second synchronous API performance.
@@ -94,6 +98,8 @@ We needed a system that offered the surgical extraction speed of our Rust covere
 While the Python `xarray` ecosystem failed at scale, we hypothesized that querying Zarr natively in a compiled language would bypass the object overhead. We built a custom PyO3 plugin using the pure-Rust `zarrs` crate, combined with `geo-rasterize` and `rayon` for native multi-threading.
 
 **The Performance:** Bypassing the Python GIL entirely, the Rust binary reads the `.zarray` metadata directly, mathematically traces the exact pixel bounds for every polygon using the pure-Rust rasterizer, fetches exactly the necessary bytes from the chunked Zarr array, and tallies the result natively. 
+
+![Polygon Latency Showdown](/plots/04_polygon_latency.png)
 
 The pipeline extracted 100,000 polygons in **1.57 seconds**. 
 
