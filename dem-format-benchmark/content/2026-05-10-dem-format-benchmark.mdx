@@ -17,7 +17,7 @@ To empirically test architectures for this colossal challenge without blowing ou
 **TL;DR:** For massive batch extraction of 100K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides the optimal balance of storage compression, analytical accuracy, and sub-second synchronous API performance.
 </Callout>
 
-## The Existing Ecosystem & Its Flaws
+## Exploring the Ecosystem
 
 The standard approach to managing spatial raster data involves N-dimensional arrays, predominantly **Cloud Optimized GeoTIFFs (COG)** or cloud-native **Zarr** stores. 
 
@@ -96,6 +96,8 @@ While the Python `xarray` ecosystem failed at scale, we hypothesized that queryi
 **The Performance:** Bypassing the Python GIL entirely, the Rust binary reads the `.zarray` metadata directly, mathematically traces the exact pixel bounds for every polygon using the pure-Rust rasterizer, fetches exactly the necessary bytes from the chunked Zarr array, and tallies the result natively. 
 
 The pipeline extracted 100,000 polygons in **1.57 seconds**. 
+
+**Is this also a "forgiving" local benchmark?** Yes, this 1.57-second execution was run locally. If this Zarr array were hosted on S3, there would be network latency. *However*, Zarr handles cloud latency exponentially better than tiled COGs. Tiled COGs require downloading complex TIFF headers for millions of disparate files. Zarr has a single, instantly readable JSON metadata file. Furthermore, because Native Zarr fetches raw byte-ranges, a Rust backend can asynchronously fire thousands of concurrent HTTP Range requests for the exact chunks it needs, completely hiding the network latency.
 
 Because it operates natively on the raw pixels (not compacted cells), it is 100% immune to the Parquet area-weighting flaw. You get perfect `AVG()` aggregations natively.
 
