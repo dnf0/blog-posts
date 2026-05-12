@@ -193,6 +193,13 @@ For massive, multi-dimensional spatial analytics, traditional GIS raster pipelin
 
 The ultimate architecture for a high-concurrency, global hazard API is a **pure-Rust backend querying sharded N-dimensional Zarr v3 arrays**. By leveraging `geo-rasterize` and `rayon` [10], we completely bypass the Python GIL and object overhead, extracting mathematically perfect polygon aggregations at sub-second speeds.
 
+## Future Outlook: Lance and Icechunk
+
+While Zarr v3 and Parquet dominate the current landscape, two bleeding-edge technologies are rapidly emerging as the next frontier for global spatial data:
+
+1. **Lance Format (The AI-First Format):** Parquet was designed for traditional data warehousing. **Lance** is a modern columnar format written in Rust specifically designed for machine learning and multimodal data. It natively integrates with GeoArrow (understanding points and polygons in memory). Crucially, Lance is optimized for **huge-scale data storage and rapid random access**. In recent benchmarks, Lance demonstrated up to 2,000x faster random access times than Parquet for fetching specific blobs of data (like imagery chunks). If your spatial API evolves into feeding randomly shuffled data into an AI model for real-time inference, Lance is the state-of-the-art solution.
+2. **Icechunk (Version Control for Zarr):** A massive challenge with a 240 TB global Zarr cube is managing updates. If a data scientist improves the flood model for a specific county, overwriting production data is terrifying. **Icechunk** is a new transactional storage engine built natively for Zarr that brings "Git-like" version control to data cubes. It allows teams to create zero-copy branches of petabyte-scale arrays, write updates, and merge them with full ACID compliance.
+
 ## Reproduce This
 
 All scripts are at `github.com/dnf0/dem-format-benchmark`. Change `config.py` to point at your own region and run:
