@@ -39,7 +39,7 @@ This is fundamentally an $O(N)$ sequential operation over geometries.
 
 Extracting 100,000 polygons via Rasterio took **181 seconds (over 3 minutes)**. And importantly, this benchmark is an incredibly forgiving "best-case" scenario: it assumes your entire DEM is stored in a single, locally mounted TIFF file. In reality, global raster datasets are stored as millions of partitioned map tiles in cloud object storage (like AWS S3). If you had to query 100,000 global polygons against tiled COGs, Rasterio would have to execute massive network I/O, download hundreds of remote HTTP headers, and dynamically stitch tiles together in memory. That 3-minute local benchmark would easily explode into hours of network latency. 
 
-The standard Zarr Python ecosystem (`xarray` + `rioxarray`) fared even worse, failing at 110 seconds for just *100* polygons due to the immense overhead of instantiating complex Python objects for every surgical slice.
+The standard Zarr Python ecosystem (`xarray` + `rioxarray`) fared even worse, failing at 110 seconds for just *100* polygons due to the immense overhead of instantiating complex Python objects for each individual polygon extraction.
 
 This linear scaling completely fails synchronous Web API constraints. We need a new paradigm.
 
