@@ -11,7 +11,7 @@ When accounting for the dimensionality of climate modeling—12 years, 4 emissio
 
 A primary constraint of this system is that the API must execute synchronous, low-latency extractions for batches of up to **100,000 irregular polygons** at a time. If a user queries 100,000 catchments or property boundaries on a map, the hazard analytics must be returned in seconds, not hours.
 
-To empirically test architectures for this colossal challenge without blowing our cloud budget, we need a manageable proxy. In this post, we use a 6°×6° Copernicus Digital Elevation Model (DEM) covering the Swiss Alps (1.7GB, ~466M pixels). By applying a `q2500` quantization (rounding elevations into 2,500m buckets), we artificially transform the noisy mountain terrain into massive, uniform blocks. 
+To empirically test architectures for this colossal challenge without blowing our cloud budget, we need a manageable proxy. In this post, we use a 6°×6° Copernicus Digital Elevation Model (DEM) [1] covering the Swiss Alps (1.7GB, ~466M pixels). By applying a `q2500` quantization (rounding elevations into 2,500m buckets), we artificially transform the noisy mountain terrain into massive, uniform blocks. 
 
 ![Quantization Comparison](/plots/00_quantization_visual.png)
 
@@ -23,7 +23,7 @@ This provides a reasonable approximation of the smooth, categorical nature of gl
 
 ## Exploring the Ecosystem - The Existing Ecosystem & Its Flaws
 
-The standard approach to managing spatial raster data involves N-dimensional arrays, predominantly **Cloud Optimized GeoTIFFs (COG)** or cloud-native **Zarr** stores. 
+The standard approach to managing spatial raster data involves N-dimensional arrays, predominantly **Cloud Optimized GeoTIFFs (COG)** [2] or cloud-native **Zarr** stores [3]. 
 
 In these formats, data is chunked into 2D or 3D grids (e.g., 512x512 pixels) and compressed using algorithms like ZSTD or DEFLATE. They are incredibly efficient at storage because they avoid storing coordinates entirely—the X and Y coordinates are implied by the pixel's position in the grid array. Our quantized DEM proxy compressed down to a beautiful **9.7 MB** in COG and **9.8 MB** in Zarr.
 
@@ -47,11 +47,11 @@ This linear scaling completely fails synchronous Web API constraints. We need a 
 
 ![Storage size by format](/plots/01_storage_size.png)
 
-What if we treat the map like a database? Instead of looping over geometries and masking rasters, we could flatten the data into a tabular format like **Parquet**, enabling us to use hyper-optimized relational database engines like DuckDB or Polars.
+What if we treat the map like a database? Instead of looping over geometries and masking rasters, we could flatten the data into a tabular format like **Parquet** [4], enabling us to use hyper-optimized relational database engines like DuckDB [5] or Polars.
 
 The immediate problem is the **"Coordinate Tax"**. Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or WKB geometries) for every single pixel. This bloat is catastrophic. A flat Parquet file for our proxy DEM exploded to hundreds of megabytes.
 
-To eliminate this tax, we utilized a **Native 2D Hilbert Curve**. By mapping the global 1-arc-second grid `(col, row)` to a 1D Hilbert integer using bitwise XOR rotations, the index *becomes* the location. We drop the explicit coordinates entirely.
+To eliminate this tax, we utilized a **Native 2D Hilbert Curve** [7]. By mapping the global 1-arc-second grid `(col, row)` to a 1D Hilbert integer using bitwise XOR rotations, the index *becomes* the location. We drop the explicit coordinates entirely.
 
 ```rust
 // Core bitwise logic mapping 2D (x, y) to a 1D Hilbert distance (d)
@@ -119,7 +119,7 @@ While the Parquet Hash Join is incredibly fast, we discovered that generating th
 
 We needed a system that offered the surgical extraction speed of our Rust coverer, the raw pixel mathematical accuracy of Rasterio, and the mega compression of chunked arrays. We turned back to Zarr.
 
-While the Python `xarray` ecosystem failed at scale, we hypothesized that querying Zarr natively in a compiled language would bypass the object overhead. We built a custom PyO3 plugin using the pure-Rust `zarrs` crate, combined with `geo-rasterize` and `rayon` for native multi-threading.
+While the Python `xarray` ecosystem failed at scale, we hypothesized that querying Zarr natively in a compiled language would bypass the object overhead. We built a custom PyO3 plugin using the pure-Rust `zarrs` crate [8], combined with `geo-rasterize` and `rayon` [10] for native multi-threading.
 
 **The Performance:** Bypassing the Python GIL entirely, the Rust binary reads the `.zarray` metadata directly, mathematically traces the exact pixel bounds for every polygon using the pure-Rust rasterizer, fetches exactly the necessary bytes from the chunked Zarr array, and tallies the result natively. 
 
@@ -191,7 +191,7 @@ This preserves the microsecond read performance of tiny chunks while reducing th
 ### Final Verdict
 For massive, multi-dimensional spatial analytics, traditional GIS raster pipelines fail under the weight of sequential $O(N)$ geometry masking. Tabular Parquet hash joins provide a spectacular sub-linear alternative for 1D datasets, but falter when calculating exact area-weighted averages or scaling to hundreds of dimensional layers. 
 
-The ultimate architecture for a high-concurrency, global hazard API is a **pure-Rust backend querying sharded N-dimensional Zarr v3 arrays**. By leveraging `geo-rasterize` and `rayon`, we completely bypass the Python GIL and object overhead, extracting mathematically perfect polygon aggregations at sub-second speeds.
+The ultimate architecture for a high-concurrency, global hazard API is a **pure-Rust backend querying sharded N-dimensional Zarr v3 arrays**. By leveraging `geo-rasterize` and `rayon` [10], we completely bypass the Python GIL and object overhead, extracting mathematically perfect polygon aggregations at sub-second speeds.
 
 ## Reproduce This
 
@@ -205,7 +205,14 @@ uv run python scripts/visualize.py
 
 ## References
 
-- [Copernicus GLO-30 DEM](https://spacedata.copernicus.eu/collections/copernicus-digital-elevation-model)
-- [Cloud Optimized GeoTIFF specification](https://www.cogeo.org/)
-- [Zarr Storage Format](https://zarr.dev/)
-- [geo-rasterize Rust Crate](https://crates.io/crates/geo-rasterize)
+[1] Copernicus GLO-30 DEM: https://spacedata.copernicus.eu/collections/copernicus-digital-elevation-model
+[2] Cloud Optimized GeoTIFF specification: https://www.cogeo.org/
+[3] Zarr Storage Format: https://zarr.dev/
+[4] Apache Parquet: https://parquet.apache.org/
+[5] DuckDB: https://duckdb.org/
+[6] Polars: https://pola.rs/
+[7] Hilbert Curve: https://en.wikipedia.org/wiki/Hilbert_curve
+[8] zarrs Rust Crate: https://crates.io/crates/zarrs
+[9] geo-rasterize Rust Crate: https://crates.io/crates/geo-rasterize
+[10] rayon Rust Crate: https://crates.io/crates/rayon
+[11] Zarr V3 Sharding Specification: https://zarr.dev/zeps/draft/ZEP0002.html
