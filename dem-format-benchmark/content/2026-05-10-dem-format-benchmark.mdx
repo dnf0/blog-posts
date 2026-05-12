@@ -85,7 +85,7 @@ If a polygon covers both, the database returns just two rows. The single pixel w
 1. **For `MAX()` and `MIN()`:** Quadtree Compaction is mathematically flawless. Because a cell is only compacted if all child pixels share the exact same value, touching any part of the cell guarantees you touch that value. For finding the highest flood-risk level in a polygon, the 2.8 MB compacted file is the ultimate weapon.
 2. **For `AVG()` and `SUM()`:** You have exactly one mathematically correct option: **The Uncompacted Parquet**. You skip the Quadtree Compaction step entirely so every pixel gets its own row. Thanks to Parquet's native ZSTD/RLE compression, an uncompacted `q2500` Hilbert file still shrinks to a manageable **319 MB**. You retain perfect pixel-level analytical accuracy, and the Hash Join remains blistering fast.
 
-## The Final Boss: Native Zarr Integration in Rust
+## Native Zarr Integration in Rust
 
 While the Parquet Hash Join is incredibly fast, we discovered that generating the Hilbert pixel masks for 100,000 polygons (the "Covering" step) before the query still took ~25-30 seconds, heavily bottlenecking the total execution time. 
 
