@@ -107,6 +107,13 @@ The pipeline extracted 100,000 polygons in **1.57 seconds**.
 
 Because it operates natively on the raw pixels (not compacted cells), it is 100% immune to the Parquet area-weighting flaw. You get perfect `AVG()` aggregations natively.
 
+### Why is Zarr Larger than Parquet? (And Can We Fix It?)
+You might be wondering: if Native Zarr is so fast, why is its file size (9.8 MB) larger than Parquet (2.8 MB)? 
+
+The answer lies in the fundamental difference between chunked arrays and quadtrees. Zarr requires a dense, regular grid; it stores all 466 million pixels, relying solely on algorithms like ZSTD or DEFLATE to compress them. Parquet achieved 2.8 MB because we explicitly threw away data using Quadtree Compaction, deleting millions of identical rows. 
+
+Furthermore, Zarr's default compression traverses chunks in standard row-major (C-contiguous) order. Row-major traversal breaks spatial locality at the end of every line, making ZSTD work harder. If you wanted to push Zarr's compression closer to Parquet's, you could write a custom `numcodecs` filter to reorder the 2D chunk bytes along a Hilbert curve *before* passing them to ZSTD. This would maximize the run-length of identical values, dramatically improving the compression ratio without sacrificing the dense array structure!
+
 ## Scaling Back to the Globe (Conclusion)
 
 Returning to our original, 240 TB multi-dimensional problem (720 layers per spatial pixel), the architectural path forward is clear.
