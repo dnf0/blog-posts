@@ -144,7 +144,7 @@ The pipeline extracted 100,000 polygons in **1.57 seconds**. As seen in the scal
 
 **Is this also a "forgiving" local benchmark?** Yes, this 1.57-second execution was run locally. If this Zarr array were hosted on S3, there would be network latency. While we have not empirically benchmarked the S3 performance, Zarr's architecture is theoretically well-positioned to mitigate cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files. Zarr uses a single, instantly readable JSON metadata file. Furthermore, because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could fire thousands of concurrent HTTP Range requests for the exact chunks it needs, effectively hiding much of the network latency.
 
-Because it operates natively on the raw pixels (not compacted cells), it is 100% immune to the Parquet area-weighting flaw. You get perfect `AVG()` aggregations natively.
+Because it operates natively on the raw pixels (not compacted cells), it is 100% immune to the Parquet area-weighting flaw. You get correct `AVG()` aggregations natively.
 
 ### Why is Zarr Larger than Parquet? (And Can We Fix It?)
 You might be wondering: if Native Zarr is so fast, why is its file size (9.8 MB) larger than Parquet (2.8 MB)? 
