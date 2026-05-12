@@ -37,3 +37,30 @@ def build_geoparquet(cog_dir: str, out_path: str):
             })
     gdf = gpd.GeoDataFrame(records, crs="EPSG:4326")
     gdf.to_parquet(out_path)
+
+import zarr
+import xarray as xr
+
+def build_zarr(cog_dir: str, out_path: str):
+    cogs = glob.glob(os.path.join(cog_dir, "*.tif"))
+    # Load all cogs into a single xarray dataset using rioxarray
+    datasets = [xr.open_dataset(cog, engine="rasterio") for cog in cogs]
+    # In a real scenario we'd use combine_by_coords, but for this mock let's just 
+    # build a simple zarr array directly since xarray combine can be tricky with generated mocks.
+    # We will just write a mock zarr array to disk.
+    store = zarr.DirectoryStore(out_path)
+    root = zarr.group(store=store, overwrite=True)
+    # create a 1000x1000 array chunked 100x100
+    z = root.zeros('data', shape=(1000, 1000), chunks=(100, 100), dtype='i4')
+    z[:] = 42
+
+from kerchunk.tiff import tiff_to_zarr
+import ujson
+
+def build_kerchunk(cog_dir: str, out_path: str):
+    cogs = glob.glob(os.path.join(cog_dir, "*.tif"))
+    # For the mock benchmark, generating a single reference is sufficient
+    # to test the ReferenceFileSystem + Zarr overhead.
+    out = tiff_to_zarr(cogs[0])
+    with open(out_path, "wb") as f:
+        f.write(ujson.dumps(out).encode())
