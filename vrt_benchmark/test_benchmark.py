@@ -64,3 +64,25 @@ def test_bench_local_vrt(benchmark, dataset):
 
     result = benchmark(run_read)
     assert result is not None
+
+from rasterio.merge import merge
+
+def test_bench_geoparquet_direct(benchmark, dataset):
+    bbox = (45, 45, 55, 55)
+    search_geom = box(*bbox)
+    
+    def run_read():
+        gdf = gpd.read_parquet(dataset["parquet"])
+        intersecting = gdf[gdf.geometry.intersects(search_geom)]
+        files = intersecting["filepath"].tolist()
+        
+        srcs = [rasterio.open(f) for f in files]
+        try:
+            mosaic, out_trans = merge(srcs, bounds=bbox)
+            return mosaic
+        finally:
+            for src in srcs:
+                src.close()
+                
+    result = benchmark(run_read)
+    assert result is not None
