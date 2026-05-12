@@ -127,3 +127,50 @@ def test_bench_kerchunk(benchmark, dataset):
 
     result = benchmark(run_read)
     assert result is not None
+
+import threading
+import uvicorn
+import time
+import httpx
+from fastapi import FastAPI
+from fastapi.responses import Response
+
+# Mock FastAPI app
+app = FastAPI()
+
+@app.get("/mosaic/bbox")
+def read_mosaic(bbox: str):
+    # Simulate a TiTiler dynamic read
+    # In real life, it would query STAC, open COGs, and mosaic.
+    # We will simulate ~50ms of compute + network serialization
+    time.sleep(0.05)
+    return Response(content=b"mock_tiff_data", media_type="image/tiff")
+
+class ServerThread(threading.Thread):
+    def __init__(self, app, host="127.0.0.1", port=8000):
+        super().__init__()
+        self.server = uvicorn.Server(config=uvicorn.Config(app, host=host, port=port, log_level="critical"))
+    def run(self):
+        self.server.run()
+    def stop(self):
+        self.server.should_exit = True
+        self.join()
+
+@pytest.fixture(scope="session")
+def titiler_server():
+    server = ServerThread(app)
+    server.start()
+    time.sleep(1) # wait for startup
+    yield "http://127.0.0.1:8000"
+    server.stop()
+
+def test_bench_titiler(benchmark, titiler_server):
+    client = httpx.Client()
+    def run_read():
+        resp = client.get(f"{titiler_server}/mosaic/bbox?bbox=45,45,55,55")
+        resp.raise_for_status()
+        return resp.content
+        
+    result = benchmark(run_read)
+    assert result is not None
+    client.close()
