@@ -2,6 +2,10 @@ import os
 import rasterio
 from rasterio.transform import from_origin
 import numpy as np
+import glob
+import subprocess
+import geopandas as gpd
+from shapely.geometry import box
 
 def generate_cogs(output_dir: str, grid_size: int = 10):
     os.makedirs(output_dir, exist_ok=True)
@@ -16,3 +20,20 @@ def generate_cogs(output_dir: str, grid_size: int = 10):
                 tiled=True, compress='deflate'
             ) as dst:
                 dst.write(data, 1)
+
+def build_global_vrt(cog_dir: str, out_path: str):
+    cogs = glob.glob(os.path.join(cog_dir, "*.tif"))
+    subprocess.run(["gdalbuildvrt", out_path] + cogs, check=True)
+
+def build_geoparquet(cog_dir: str, out_path: str):
+    cogs = glob.glob(os.path.join(cog_dir, "*.tif"))
+    records = []
+    for cog in cogs:
+        with rasterio.open(cog) as src:
+            bounds = src.bounds
+            records.append({
+                "filepath": cog,
+                "geometry": box(bounds.left, bounds.bottom, bounds.right, bounds.top)
+            })
+    gdf = gpd.GeoDataFrame(records, crs="EPSG:4326")
+    gdf.to_parquet(out_path)
