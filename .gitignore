@@ -38,3 +38,6 @@ coverage.xml
 .claude/
 .gemini/
 *.log
+
+# Git worktrees
+.worktrees/
