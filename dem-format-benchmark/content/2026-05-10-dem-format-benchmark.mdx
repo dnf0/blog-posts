@@ -151,7 +151,7 @@ fn process_polygon(poly: &Polygon, array: &Array) -> u64 {
 }
 ```
 
-The pipeline extracted 100,000 polygons in **1.57 seconds**. As seen in the scaling chart above, this transforms the geometry problem from a linear roadblock into a nearly flat constant-time extraction.
+The pipeline extracted 100,000 polygons in **1.57 seconds**. It is important to note that this is still mathematically a linear $O(N)$ operation—processing 100,000 polygons takes 10 times longer than processing 10,000 polygons. However, because we shifted the geometric masking from Python objects into native Rust structs operating in the CPU's L1 cache, the constant factor is so incredibly small that the scaling curve sits functionally flat near the bottom of our graph.
 
 **Is this also a "forgiving" local benchmark?** Yes, this 1.57-second execution was run locally. If this Zarr array were hosted on S3, there would be network latency. While we have not empirically benchmarked the S3 performance, Zarr's architecture is theoretically well-positioned to mitigate cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files. Zarr uses a single, instantly readable JSON metadata file. Furthermore, because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could fire thousands of concurrent HTTP Range requests for the exact chunks it needs, effectively hiding much of the network latency.
 
