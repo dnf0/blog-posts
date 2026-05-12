@@ -21,3 +21,14 @@ def test_build_indices(tmp_path):
     build_geoparquet(str(cog_dir), str(pq_path))
     df = gpd.read_parquet(pq_path)
     assert len(df) == 4
+
+from .data_gen import build_zarr
+
+def test_build_zarr(tmp_path):
+    cog_dir = tmp_path / "cogs"
+    cog_dir.mkdir()
+    generate_cogs(str(cog_dir), grid_size=2)
+    
+    zarr_path = tmp_path / "data.zarr"
+    build_zarr(str(cog_dir), str(zarr_path))
+    assert zarr_path.exists()

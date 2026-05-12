@@ -20,10 +20,15 @@ def dataset(tmp_path_factory):
     pq_path = dir_path / "index.parquet"
     build_geoparquet(str(cog_dir), str(pq_path))
     
+    from .data_gen import build_zarr
+    zarr_path = dir_path / "data.zarr"
+    build_zarr(str(cog_dir), str(zarr_path))
+    
     return {
         "vrt": str(vrt_path),
         "parquet": str(pq_path),
-        "cogs": str(cog_dir)
+        "cogs": str(cog_dir),
+        "zarr": str(zarr_path)
     }
 
 def test_bench_global_vrt(benchmark, dataset):
@@ -84,5 +89,20 @@ def test_bench_geoparquet_direct(benchmark, dataset):
             for src in srcs:
                 src.close()
                 
+    result = benchmark(run_read)
+    assert result is not None
+
+import zarr
+
+def test_bench_zarr(benchmark, dataset):
+    # bbox in pixels (mocking the spatial query)
+    # 45,45 to 55,55 in spatial translates to pixel slices in our mock 1000x1000 Zarr.
+    # Let's say pixels 450:550
+    def run_read():
+        store = zarr.DirectoryStore(dataset["zarr"])
+        root = zarr.group(store=store)
+        data = root['data'][450:550, 450:550]
+        return data
+
     result = benchmark(run_read)
     assert result is not None
