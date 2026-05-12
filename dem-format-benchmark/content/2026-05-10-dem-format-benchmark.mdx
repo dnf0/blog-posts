@@ -15,7 +15,7 @@ To empirically test architectures for this colossal challenge without blowing ou
 
 ![Quantization Comparison](/plots/00_quantization_visual.png)
 
-This perfectly simulates the smooth, categorical nature of global hazard data (like flood models or climate bands), allowing us to rigorously benchmark how different formats handle extreme spatial scaling.
+This provides a reasonable approximation of the smooth, categorical nature of global hazard data (like flood models or climate bands), allowing us to rigorously benchmark how different formats handle extreme spatial scaling.
 
 <Callout type="info">
 **TL;DR:** For massive batch extraction of 100K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides the optimal balance of storage compression, analytical accuracy, and sub-second synchronous API performance.
