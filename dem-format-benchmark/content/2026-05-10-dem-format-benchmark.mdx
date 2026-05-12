@@ -166,14 +166,32 @@ Furthermore, Zarr's default compression traverses chunks in standard row-major (
 
 ## Scaling Back to the Globe (Conclusion)
 
-Returning to our original, 240 TB multi-dimensional problem (720 layers per spatial pixel), the architectural path forward is clear.
+Returning to our original, 240 TB multi-dimensional problem (720 distinct hazard layers per 30m spatial pixel), the architectural path forward requires carefully navigating the limits of modern data structures. 
 
-Parquet schemas struggle with 720-layer hyper-dimensionality, as the schemas become incredibly wide or deep, destroying columnar scan efficiency. Zarr natively handles N-dimensional chunking (`[layer, y, x]`), making it purpose-built for climate data cubes.
+If we attempted to scale the **Hilbert Parquet** architecture globally, we would face a hyper-dimensionality crisis. Parquet schemas are fundamentally designed for narrow tables (e.g., 10-50 columns). To store 720 layers per pixel, we would either have to create an incredibly wide table (720 columns), which destroys columnar scan efficiency during projection, or create a deeply nested array structure, which forces the database engine to deserialize massive blobs of data just to read a single hazard variable. 
 
-**The Catch (The "Many Files" Problem):** Zarr v2 stores every single chunk as a separate file on disk. A 240 TB dataset will generate billions of tiny files, exhausting disk inodes and choking cloud object storage (S3) `LIST` operations.
-*   **The Solution:** Use **Zarr v3 (Sharding)**. Sharding groups thousands of chunks into single files, preserving the chunked read performance while solving the file-count explosion.
+Conversely, **Zarr** is purpose-built for this exact scenario. It natively handles N-dimensional chunking (e.g., `[layer, y, x]`). If an API request only asks for "Year 5, RCP 4.5, 100-year return period", the Rust backend calculates the exact 1D index for that specific layer, and reads *only* the bytes corresponding to that slice. The other 719 layers are never touched, never fetched, and never loaded into memory.
 
-**Final Verdict:** A pure-Rust backend querying sharded N-dimensional Zarr arrays provides the optimal balance of massive storage compression, perfect analytical accuracy, and sub-second synchronous API performance for global hazard data.
+### Overcoming Cloud Storage Limits: Zarr v3 Sharding
+The final hurdle to deploying this global Zarr cube is the nature of cloud object storage (like AWS S3). 
+
+Zarr v2 stores every single chunk as an individual file. A global 30m dataset with 720 layers chunked into 512x512 grids would generate **billions of tiny files**. S3 is not a true file system; it is a key-value object store. Billions of files will exhaust inode limits on any local caching layer, make data transfer agonizingly slow, and cause your cloud bill to explode due to the sheer cost of HTTP `PUT` and `LIST` requests. 
+
+The solution is **Zarr v3 Sharding**. 
+
+Sharding introduces a two-tier hierarchy. Instead of saving thousands of small chunks directly to S3, Zarr v3 groups them into massive "Shards" (e.g., a single 500 MB file). Critically, appended to the end of each shard is a tiny byte-offset index. 
+When our Rust backend queries the globe:
+1. It reads the master metadata to find which Shard file contains the data.
+2. It fetches the last few kilobytes of that Shard (the index) via an HTTP Range request.
+3. It parses the index to find the exact byte-offset of the specific 512x512 inner chunk.
+4. It executes a second HTTP Range request to fetch exactly the bytes it needs.
+
+This preserves the microsecond read performance of tiny chunks while reducing the total number of files in your S3 bucket by a factor of 10,000.
+
+### Final Verdict
+For massive, multi-dimensional spatial analytics, traditional GIS raster pipelines fail under the weight of sequential $O(N)$ geometry masking. Tabular Parquet hash joins provide a spectacular sub-linear alternative for 1D datasets, but falter when calculating exact area-weighted averages or scaling to hundreds of dimensional layers. 
+
+The ultimate architecture for a high-concurrency, global hazard API is a **pure-Rust backend querying sharded N-dimensional Zarr v3 arrays**. By leveraging `geo-rasterize` and `rayon`, we completely bypass the Python GIL and object overhead, extracting mathematically perfect polygon aggregations at sub-second speeds.
 
 ## Reproduce This
 
