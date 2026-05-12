@@ -61,7 +61,7 @@ Unlike COG and Zarr (which blindly compress fixed 512x512 blocks using DEFLATE/Z
 
 This process doesn't stop at 60m. It recursively climbs up 16 levels of the quadtree. For large, uniform areas like flood plains or climate zones, millions of pixels collapse into a handful of massive parent cells, acting as a massive 2D Run-Length Encoder. 
 
-By applying this to our Hilbert Parquet file, the file size shrank dramatically from 1.7 GB down to just **2.8 MB**, beating even COG and Zarr.
+By applying this to our Hilbert Parquet file, the file size shrank dramatically from 1.7 GB down to an incredibly compact **2.8 MB**. (Note that this is slightly larger than COG at 2.37 MB and Zarr at 1.65 MB, because Parquet must still explicitly store the 1D Hilbert index column for every cell, while N-dimensional arrays imply locations entirely by position).
 
 ### Evaluating Vectorized Hash Joins
 
@@ -73,7 +73,7 @@ SELECT band_value FROM read_parquet('dem.parquet') WHERE hilbert_index IN (...)
 
 ![Polygon Scaling](/plots/05_scaling_polygons.png)
 
-The performance shift is staggering. As seen in the scaling chart, the actual database query step (the Hash Join) scales logarithmically ($O(\log N)$). Polars processed the data extraction for 100,000 polygons in just **11.7 seconds** (compared to Rasterio's 3 minutes). 
+The performance shift is staggering. As seen in the scaling chart, the actual database query step (the Hash Join) does not scale linearly like Rasterio; it scales sub-linearly (empirically $O(N^{0.83})$). Polars processed the database query for 100,000 polygons in just **11.7 seconds** (compared to Rasterio's 3 minutes). 
 
 Why? Because 118 million raw DEM pixels were compacted down to just 500,000 massive parent cells. We didn't just write faster code; we mathematically shrank the problem space.
 
