@@ -99,11 +99,9 @@ While the Python `xarray` ecosystem failed at scale, we hypothesized that queryi
 
 **The Performance:** Bypassing the Python GIL entirely, the Rust binary reads the `.zarray` metadata directly, mathematically traces the exact pixel bounds for every polygon using the pure-Rust rasterizer, fetches exactly the necessary bytes from the chunked Zarr array, and tallies the result natively. 
 
-![Polygon Latency Showdown](/plots/04_polygon_latency.png)
+The pipeline extracted 100,000 polygons in **1.57 seconds**. As seen in the scaling chart above, this transforms the geometry problem from a linear roadblock into a nearly flat constant-time extraction.
 
-The pipeline extracted 100,000 polygons in **1.57 seconds**. 
-
-**Is this also a "forgiving" local benchmark?** Yes, this 1.57-second execution was run locally. If this Zarr array were hosted on S3, there would be network latency. *However*, Zarr handles cloud latency exponentially better than tiled COGs. Tiled COGs require downloading complex TIFF headers for millions of disparate files. Zarr has a single, instantly readable JSON metadata file. Furthermore, because Native Zarr fetches raw byte-ranges, a Rust backend can asynchronously fire thousands of concurrent HTTP Range requests for the exact chunks it needs, completely hiding the network latency.
+**Is this also a "forgiving" local benchmark?** Yes, this 1.57-second execution was run locally. If this Zarr array were hosted on S3, there would be network latency. While we have not empirically benchmarked the S3 performance, Zarr's architecture is theoretically well-positioned to mitigate cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files. Zarr uses a single, instantly readable JSON metadata file. Furthermore, because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could fire thousands of concurrent HTTP Range requests for the exact chunks it needs, effectively hiding much of the network latency.
 
 Because it operates natively on the raw pixels (not compacted cells), it is 100% immune to the Parquet area-weighting flaw. You get perfect `AVG()` aggregations natively.
 
