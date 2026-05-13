@@ -173,7 +173,12 @@ The distinction between Lance and Zarr for polygon queries relies on the differe
 
 When querying a polygon, the requirement is a clustered geographic neighborhood. Zarr is optimized for this via 2D spatial tiles (e.g., 512x512 pixels). The Rust backend fetches the required 2D tile via a single HTTP Range request. Once decompressed in memory, all necessary pixels are spatially contiguous.
 
-Lance is a 1D columnar format. Querying a polygon requires translating the 2D shape into thousands of 1D Hilbert integers. Because the irregular polygon boundary cuts across the Hilbert curve, these integers are fragmented, requiring Lance to execute thousands of non-contiguous row fetches. The overhead of assembling these fragmented rows limits its performance for massive batch polygon extractions (~0.46 seconds for 1K polygons, compared to Zarr's 0.24 seconds).
+Lance and Parquet are 1D columnar formats. Querying a polygon requires translating the 2D shape into thousands of 1D Hilbert integers. Because the irregular polygon boundary cuts across the Hilbert curve, these integers are fragmented, requiring Lance to execute thousands of non-contiguous row fetches. The overhead of assembling these fragmented rows limits its performance for massive batch polygon extractions (~0.46 seconds for 1K polygons, compared to Zarr's 0.24 seconds).
+
+#### The Read Amplification Paradox (Overfetching)
+A common critique of Zarr is that it suffers from "overfetching" (Read Amplification). If a polygon only touches 10 pixels within a 512x512 chunk, Zarr still must download and decompress the entire 262,144-pixel chunk. 
+
+While this is true, it is a paradox that Parquet and Lance actually overfetch *more* data for 2D geometries. Columnar formats compress data into discrete blocks (e.g., 1MB Parquet Pages). To read a single row, the database must download and decompress the entire 1MB Page. Because a 2D polygon fragments into thousands of disconnected 1D Hilbert segments, those segments scatter across dozens of different compression pages on disk. Therefore, to read a single polygon, a columnar database often downloads and decompresses significantly more irrelevant data blocks than Zarr, which cleanly bounds the overfetching to a few 2D spatial chunks.
 
 **General Heuristic:** For fetching disconnected data points (e.g., AI model data shuffling), Lance is optimal. For fetching clustered 2D shapes, Zarr is highly efficient.
 
