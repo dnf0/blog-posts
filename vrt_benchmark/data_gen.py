@@ -64,3 +64,36 @@ def build_kerchunk(cog_dir: str, out_path: str):
     out = tiff_to_zarr(cogs[0])
     with open(out_path, "wb") as f:
         f.write(ujson.dumps(out).encode())
+
+import pyarrow as pa
+from lance.dataset import write_dataset
+
+def build_lance(cog_dir: str, out_path: str):
+    cogs = glob.glob(os.path.join(cog_dir, "*.tif"))
+    
+    filepaths = []
+    geometries = []
+    images = []
+    
+    for cog in cogs:
+        with rasterio.open(cog) as src:
+            bounds = src.bounds
+            data = src.read(1) # shape: (100, 100)
+            
+            filepaths.append(cog)
+            geometries.append(box(bounds.left, bounds.bottom, bounds.right, bounds.top).wkb)
+            images.extend(data.flatten())
+            
+    # FixedSizeList(uint8, 100*100)
+    tensor_type = pa.list_(pa.uint8(), 100 * 100)
+    
+    table = pa.table({
+        "filepath": pa.array(filepaths, type=pa.string()),
+        "geometry_wkb": pa.array(geometries, type=pa.binary()),
+        "image": pa.FixedSizeListArray.from_arrays(
+            pa.array(images, type=pa.uint8()), 
+            100 * 100
+        )
+    })
+    
+    write_dataset(table, out_path)
