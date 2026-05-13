@@ -15,7 +15,7 @@ description: "An empirical benchmark of architectural approaches for synchronous
 
 The overarching objective of this engineering initiative is to design and build a high-concurrency web API capable of serving global climate hazard data at scale. The physical scope of this task is substantial: the target spatial resolution is 30m across all of Earth's landmass, which equates to approximately 166 billion pixels per layer. 
 
-When factoring in the dimensionality required by modern climate modelling. For instance in my current role I'm working with data that spans 12 years for emission scenarios, 5 return periods, and 3 percentiles. I'm working with data that expands to 700 distinct layers per spatial pixel. This results in a multi-dimensional data cube containing over 120 trillion data points, exceeding 240 Terabytes in its uncompressed state.
+This scale compounds rapidly when factoring in the dimensionality required by modern climate modelling. For instance, in my current role, I am working with data that spans 12 projection years across multiple emission scenarios, 5 return periods, and 3 percentiles. This expands the dataset to 700 distinct layers per spatial pixel, resulting in a multi-dimensional data cube containing over 120 trillion data points and exceeding 240 Terabytes in its uncompressed state.
 
 A critical constraint of this API is the requirement for synchronous, low-latency execution. Specifically I am working on a system which must process batch extractions of thousands of irregular polygons simultaneously. If an end-user queries 1,000 distinct catchments or property boundaries on a map, the hazard analytics for all 1,000 polygons must be calculated and returned within standard synchronous API timeout limits.
 
