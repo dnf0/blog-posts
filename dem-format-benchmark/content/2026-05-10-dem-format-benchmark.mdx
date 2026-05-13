@@ -103,16 +103,21 @@ This process recursively ascends 16 levels of the quadtree. For uniform areas, m
 
 Applying this Quadtree Compaction to the `q2500` Hilbert Parquet file reduced the file size from the 1.1 GB raw baseline down to just 2.8 MB. (Note that this compacted Parquet file is slightly larger than the `q2500` COG at 2.4 MB and Zarr at 1.7 MB, because Parquet must still explicitly store the 1D Hilbert index column for every cell, whereas N-dimensional arrays imply locations entirely by position).
 
-### Evaluating Vectorized Hash Joins
+### Evaluating Scaling Performance Across Architectures
 
-With the data stored as compacted 1D integers in Parquet, I implemented a client-side region coverer. The system calculates the exact Hilbert cells intersecting the requested polygons and passes that list to Polars or DuckDB to execute a vectorized Hash Join.
+With the data stored as compacted 1D integers in Parquet, I implemented a client-side region coverer. The system calculates the exact Hilbert cells intersecting the requested polygons and passes that list to Polars or DuckDB to execute a vectorized Hash Join. 
+
+By comparing this tabular approach against traditional geospatial masking and emerging formats, we can observe the fundamental scaling constraints of each architecture.
 
 ![Polygon Scaling](/plots/05_scaling_polygons.png)
 *Figure 3: Scaling execution time as a function of polygon batch size. Database join logic scales sub-linearly, while traditional bounding box masks scale linearly.*
 
-As seen in the scaling chart (see Figure 3), the database query step (the Hash Join) scales sub-linearly (empirically $O(N^{0.83})$). Polars processed the database query for 1,000 polygons in 0.18 seconds. 
+As seen in the scaling chart (see Figure 3), the performance divergence is stark:
 
-This is primarily because 466 million raw DEM pixels were compacted down to roughly 2.6 million parent cells, mathematically shrinking the problem space before the join operation.
+1. **Traditional GIS (Rasterio + COG):** Scales strictly linearly ($O(N)$). Sequential bounding box masking struggles under the weight of large batches, requiring 0.73 seconds for 1,000 polygons.
+2. **Tabular Data (Polars/DuckDB + Parquet):** The database query step (the Hash Join) scales sub-linearly (empirically $O(N^{0.83})$). Polars processed the database query for 1,000 polygons in just 0.18 seconds. This is primarily because 466 million raw DEM pixels were compacted down to roughly 2.6 million parent cells, mathematically shrinking the problem space before the join operation.
+3. **AI Random Access (Lance):** Lance entirely bypasses the metadata startup penalty of Parquet. For small batches (10 polygons), its random-access design executes the query almost instantly. However, as the batch scales to 1,000 polygons, the overhead of assembling thousands of fragmented rows catches up, pulling its execution time to 0.25 seconds (slightly slower than Parquet).
+4. **Native Chunking (Pure Rust Zarr):** Bypassing both SQL overhead and Python iteration, the native Rust Zarr extraction dominates the pack. It maintains a functionally flat scaling curve due to minimal constant-time overhead, completing the entire extraction for 1,000 polygons in 0.24 seconds.
 
 ## The Area-Weighting Trade-off
 
