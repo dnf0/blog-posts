@@ -33,14 +33,14 @@ To ensure reproducibility and transparency, it is critical to define the constra
 *   **Concurrency Model:** To ensure a fair architectural comparison, we explicitly bypassed the Python Global Interpreter Lock (GIL) wherever possible. For the Rasterio benchmark, we utilised Python's `ThreadPoolExecutor` because Rasterio's underlying C++ bindings release the GIL during masking operations, allowing it to utilize all 12 cores. The pure-Rust backend (`zarrs` and `geo-rasterize`) and the Hilbert coverer (`polars_hilbert`) explicitly utilised multi-threading via the `rayon` crate. DuckDB and Polars naturally utilised multi-threading for their tabular Hash Joins. Only the Python-native `xarray` operations remained bound by single-threaded execution loops. The fact that the 12-core pure-Rust Zarr implementation massively outperformed the 12-core Python/C++ Rasterio implementation highlights the severe overhead of Python object instantiation and serialization, even when the GIL is bypassed. 
 
 ## Methodology: Evaluated Architectures
-To fully understand the results, it is essential to detail the different methods and tools evaluated in this benchmark. We tested six distinct architectural approaches to extract data for geometric polygons:
+To fully understand the results, it is essential to detail the different architectural combinations evaluated in this benchmark. We tested distinct pairs of data formats and query engines to extract data for geometric polygons:
 
-1. **Rasterio (COG):** The industry-standard Python bindings for the C++ GDAL (Geospatial Data Abstraction Library) library. It queries Cloud Optimized GeoTIFFs (COGs) by individually masking the bounding box of each polygon. 
-2. **Xarray (Zarr):** A popular Python data science library used to lazily load and query N-dimensional Zarr arrays. 
-3. **DuckDB (Parquet & Lance):** An embedded analytical SQL database written in C++. It excels at executing vectorized "Hash Joins" over columnar data formats like Parquet and Lance.
-4. **Polars (Parquet):** A lightning-fast DataFrame library written in Rust, utilized here to perform the exact same Hash Joins as DuckDB, serving as a secondary validation of the columnar tabular approach.
-5. **Pure Rust Zarr (`zarrs`):** A custom backend we built natively in Rust. It bypasses Python and C++ entirely, directly fetching byte-ranges from Zarr chunks using the `zarrs` crate and geometrically masking them using the `geo-rasterize` crate.
-6. **Lance Scanner:** The native Rust query engine built for the Lance data format, optimized for rapid random access of data blobs for artificial intelligence (AI) models.
+1. **Rasterio + COG:** The industry-standard Python bindings for the C++ GDAL (Geospatial Data Abstraction Library) library querying Cloud Optimized GeoTIFFs (COGs). It extracts data by individually masking the bounding box of each polygon. 
+2. **Xarray + Zarr:** A popular Python data science library used to lazily load and sequentially query N-dimensional Zarr arrays. 
+3. **DuckDB + Parquet:** An embedded analytical SQL database written in C++ executing vectorized "Hash Joins" over the 1D columnar Parquet format.
+4. **Polars + Parquet:** A lightning-fast DataFrame library written in Rust, utilized here to perform the exact same Hash Joins over Parquet as DuckDB, serving as a secondary validation of the columnar tabular approach.
+5. **Pure Rust Zarr (`zarrs` + Zarr):** A custom backend we built natively in Rust. It bypasses Python and C++ entirely, directly fetching byte-ranges from Zarr chunks using the `zarrs` crate and geometrically masking them using the `geo-rasterize` crate.
+6. **DuckDB + Lance & Lance Scanner:** We queried the Lance data format—optimized for rapid random access of data blobs for artificial intelligence (AI) models—using both DuckDB Hash Joins and the native Lance Scanner query engine.
 
 ## Exploring the Ecosystem
 
