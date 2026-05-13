@@ -193,6 +193,13 @@ def plot_scaling_assessment() -> None:
     
     # Restructure data to show Query Time vs Total Time explicitly
     plot_data = []
+    
+    # Calculate O(N) baseline from Rasterio at N=10
+    rasterio_10 = df[(df["tool"] == "Rasterio + COG") & (df["batch_size"] == 10)]
+    baseline_time_per_poly = 0
+    if not rasterio_10.empty:
+        baseline_time_per_poly = rasterio_10.iloc[0]["total_time_s"] / 10.0
+
     for _, row in df.iterrows():
         if "Rasterio" in row["tool"]:
             plot_data.append({"Architecture": "Rasterio + COG (Total Time)", "Polygons": row["batch_size"], "Seconds": row["total_time_s"]})
@@ -207,6 +214,14 @@ def plot_scaling_assessment() -> None:
                 plot_data.append({"Architecture": f"{engine} + Hilbert (Total Time)", "Polygons": row["batch_size"], "Seconds": row["total_time_s"]})
                 plot_data.append({"Architecture": f"{engine} + Hilbert (Database Query Only)", "Polygons": row["batch_size"], "Seconds": row["query_time_s"]})
                 
+    if baseline_time_per_poly > 0:
+        for n in sorted(df["batch_size"].unique()):
+            plot_data.append({
+                "Architecture": "Theoretical O(N) Linear Scaling",
+                "Polygons": n,
+                "Seconds": baseline_time_per_poly * n
+            })
+
     plot_df = pd.DataFrame(plot_data)
     
     fig = px.line(
@@ -225,6 +240,7 @@ def plot_scaling_assessment() -> None:
             "Polars + Hilbert (Database Query Only)": "green",
             "DuckDB + Lance (Database Query Only)": "orange",
             "Pure Rust Zarr (Total Time)": "purple",
+            "Theoretical O(N) Linear Scaling": "gray",
         }
     )
     
@@ -232,6 +248,8 @@ def plot_scaling_assessment() -> None:
     for d in fig.data:
         if "Query Only" in d.name:
             d.line.dash = 'dash'
+        elif "Theoretical" in d.name:
+            d.line.dash = 'dot'
     
     fig.update_layout(template="plotly_white", height=600, width=1000)
     out = PLOTS_DIR / "05_scaling_polygons.png"
