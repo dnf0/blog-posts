@@ -87,9 +87,9 @@ This linear scaling is insufficient for synchronous Web API constraints, necessi
 ![Storage size by format](/plots/01_storage_size.png)
 *Figure 2: Storage footprint of different architectural formats, illustrating the impact of the Coordinate Tax and Quadtree Compaction.*
 
-An alternative approach is treating spatial data as tabular data (see Figure 2). By flattening the data into a columnar format like Parquet [4], I can utilise relational database engines like DuckDB [5] or Polars [6].
+An alternative approach is treating spatial data as tabular data. By flattening the data into a columnar format like Parquet [4], I can utilise analytical SQL engines like DuckDB [5] or DataFrame libraries like Polars [6].
 
-A known limitation of this approach is the "Coordinate Tax". Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or WKB geometries) for every pixel. This introduces significant storage overhead. An uncompacted, flat Parquet file with raw explicit X/Y coordinates for the 6°×6° proxy DEM required over 1.1 GB.
+A known limitation of this approach is the "Coordinate Tax". Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or WKB geometries) for every pixel. This introduces significant storage overhead (see Figure 2). An uncompacted, flat Parquet file with raw explicit X/Y coordinates for the 6°×6° proxy DEM required over 1.1 GB.
 
 To eliminate this overhead, I utilised a Native 2D Hilbert Curve [7]. By mapping the global 1-arc-second grid `(col, row)` to a 1D Hilbert integer using bitwise XOR rotations, the index replaces the explicit location coordinates.
 
