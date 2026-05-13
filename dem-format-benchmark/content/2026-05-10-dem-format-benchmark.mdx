@@ -123,34 +123,6 @@ Bypassing the Python object overhead, we built a custom PyO3 plugin using the pu
 
 **Performance:** The Rust binary reads the `.zarray` metadata directly, traces the pixel bounds for every polygon using the pure-Rust rasterizer, fetches the necessary bytes from the chunked Zarr array, and tallies the result natively. 
 
-```rust
-// Simplified core extraction logic
-fn process_polygon(poly: &Polygon, array: &Array) -> u64 {
-    // 1. Calculate pixel bounds from the polygon's geographic footprint
-    let (c_start, c_stop, r_start, r_stop) = calculate_pixel_bounds(poly);
-    let width = (c_start.max(c_stop) - c_start.min(c_stop)) as usize;
-    let height = (r_start.max(r_stop) - r_start.min(r_stop)) as usize;
-
-    // 2. Trace the polygon into an exact (col, row) binary mask
-    let mut rasterizer = BinaryRasterizer::new(width, height, Some(geo_to_pix)).unwrap();
-    rasterizer.rasterize(poly).unwrap();
-    let mask_array = rasterizer.finish();
-
-    // 3. Fetch ONLY the intersecting byte-range from the Zarr chunk on disk/S3
-    let subset = ArraySubset::new_with_ranges(&[0..1, r_start..r_stop, c_start..c_stop]);
-    let zarr_data = array.retrieve_array_subset_elements::<i16>(&subset).unwrap();
-
-    // 4. Compute natively in L1 cache
-    let mut count = 0;
-    for (i, &is_inside_poly) in mask_array.iter().enumerate() {
-        if is_inside_poly && zarr_data[i] != -32768 { 
-            count += 1; 
-        }
-    }
-    count
-}
-```
-
 This pipeline extracted 100,000 polygons in 1.57 seconds. It is mathematically a linear $O(N)$ operation. However, because the geometric masking was shifted into native Rust structs operating in the CPU's L1 cache, the constant factor is sufficiently small that the scaling curve remains low relative to traditional methods.
 
 **Cloud Latency Considerations:** This 1.57-second execution was run locally. If the Zarr array were hosted on S3, network latency would apply. While S3 performance was not empirically benchmarked, Zarr's architecture is positioned to mitigate cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files, whereas Zarr uses a single JSON metadata file. Because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could execute concurrent HTTP Range requests for the exact chunks needed.
