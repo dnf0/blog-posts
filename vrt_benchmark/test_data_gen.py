@@ -43,3 +43,14 @@ def test_build_kerchunk(tmp_path):
     kc_path = tmp_path / "index.json"
     build_kerchunk(str(cog_dir), str(kc_path))
     assert kc_path.exists()
+
+from .data_gen import build_lance
+
+def test_build_lance(tmp_path):
+    cog_dir = tmp_path / "cogs"
+    cog_dir.mkdir()
+    generate_cogs(str(cog_dir), grid_size=2)
+    
+    lance_path = tmp_path / "data.lance"
+    build_lance(str(cog_dir), str(lance_path))
+    assert lance_path.exists()

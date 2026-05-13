@@ -27,13 +27,18 @@ def dataset(tmp_path_factory):
     from .data_gen import build_kerchunk
     kc_path = dir_path / "kerchunk.json"
     build_kerchunk(str(cog_dir), str(kc_path))
+    
+    from .data_gen import build_lance
+    lance_path = dir_path / "data.lance"
+    build_lance(str(cog_dir), str(lance_path))
 
     return {
         "vrt": str(vrt_path),
         "parquet": str(pq_path),
         "cogs": str(cog_dir),
         "zarr": str(zarr_path),
-        "kerchunk": str(kc_path)
+        "kerchunk": str(kc_path),
+        "lance": str(lance_path)
     }
 
 def test_bench_global_vrt(benchmark, dataset):
@@ -174,3 +179,33 @@ def test_bench_titiler(benchmark, titiler_server):
     result = benchmark(run_read)
     assert result is not None
     client.close()
+
+from lance.dataset import LanceDataset
+from shapely import wkb
+
+def test_bench_lance(benchmark, dataset):
+    bbox = box(45, 45, 55, 55)
+    
+    def run_read():
+        ds = LanceDataset(dataset["lance"])
+        # Fetch the entire dataset as a pyarrow table
+        table = ds.to_table()
+        
+        # We simulate checking geometry intersection on the client side since lance's
+        # python API doesn't have a direct spatial filter (though LanceDB does)
+        # We can extract the WKB column, check intersection, then take the images
+        wkbs = table["geometry_wkb"].to_pylist()
+        indices = []
+        for i, geom_bytes in enumerate(wkbs):
+            geom = wkb.loads(geom_bytes)
+            if geom.intersects(bbox):
+                indices.append(i)
+                
+        # Take just the intersecting rows directly using random access via "take"
+        if indices:
+            result_table = ds.take(indices)
+            return result_table
+        return None
+
+    result = benchmark(run_read)
+    assert result is not None
