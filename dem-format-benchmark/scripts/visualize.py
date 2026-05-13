@@ -91,28 +91,35 @@ def bar_chart_by_query_type(df: pd.DataFrame, query_type: str, filename: str) ->
     # Group and aggregate
     agg = subset.groupby(["format_label", "tool_label", "data_variant"]).agg(
         median_duration_ms=("duration_ms", "median"),
-        # If any run was a timeout in the group, we can mark the group as a timeout
         is_timeout=("status", lambda x: "timeout" if "timeout" in x.values else "success")
     ).reset_index()
 
     agg["combo"] = agg["format_label"] + " + " + agg["tool_label"]
     agg = agg.sort_values(by="median_duration_ms")
     
-    # Create pattern shape column
-    agg["pattern"] = agg["is_timeout"].apply(lambda x: "/" if x == "timeout" else "")
-
     fig = px.bar(
         agg,
         x="combo",
         y="median_duration_ms",
         color="data_variant",
-        pattern_shape="pattern",
         barmode="group",
         title=f"{QUERY_LABELS.get(query_type, query_type)} Queries: Median Duration (Log Scale)",
-        labels={"median_duration_ms": "Median Duration (ms)", "combo": "Format + Tool", "pattern": "Status"},
+        labels={"median_duration_ms": "Median Duration (ms)", "combo": "Format + Tool"},
         log_y=True,
     )
     
+    # Manually apply hatches to timeout bars without destroying the group layout
+    for trace in fig.data:
+        variant = trace.name
+        patterns = []
+        for x_val in trace.x:
+            match = agg[(agg["combo"] == x_val) & (agg["data_variant"] == variant)]
+            if not match.empty and match["is_timeout"].iloc[0] == "timeout":
+                patterns.append("/")
+            else:
+                patterns.append("")
+        trace.marker.pattern = dict(shape=patterns)
+
     # Update legend to make it cleaner
     fig.update_layout(
         template="plotly_white", 
