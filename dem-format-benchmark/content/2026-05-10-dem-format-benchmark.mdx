@@ -99,12 +99,10 @@ With the data successfully mapped to 1D integers in Parquet, querying a 2D polyg
 
 While the Parquet Hash Join is efficient, generating the Hilbert pixel masks for 1,000 polygons (the "Covering" step) took approximately 0.27 seconds, creating a preprocessing bottleneck. To achieve faster geometric extraction while maintaining raw pixel mathematical accuracy and chunked array compression, I evaluated a native Zarr approach. Bypassing the Python object overhead, I built a custom PyO3 plugin using the pure-Rust `zarrs` crate [8], combined with `geo-rasterize` [9] and `rayon` [10] for multi-threading.
 
-**Cloud Latency Considerations:** This 0.24-second execution was run locally. Prior to each benchmark run, the OS page cache was explicitly cleared to ensure a "cold start." Because the 6°×6° proxy DEM generates only ~1,700 Zarr chunks, I specifically capped the benchmark at 1,000 polygons. Querying larger batches (e.g., 100,000 polygons) on this localized dataset would mathematically guarantee that the same chunks are accessed repeatedly, transforming the test into an artificial "hot cache" in-memory benchmark. In a true 240 TB global deployment, querying thousands of disparate polygons globally would trigger constant cache misses, forcing continuous network I/O. While S3 performance was not empirically benchmarked, Zarr's architecture is positioned to mitigate this cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files, whereas Zarr uses a single JSON metadata file. Because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could execute concurrent HTTP Range requests for the exact chunks needed.
-
 Because it operates natively on the raw pixels rather than compacted cells, this approach is immune to the Parquet area-weighting flaw, yielding correct `AVG()` aggregations natively.
 
 ### Comparing Zarr and Parquet Compression
-Zarr's file size (1.7 MB) is actually smaller than the compacted Parquet file (2.8 MB) (see Figure 2). This is because Zarr requires a dense, regular grid; it stores all 466 million pixels and relies on algorithms like ZSTD or DEFLATE to compress them, which is incredibly efficient when locations are implied by position. Parquet requires 2.8 MB because, even though Quadtree Compaction explicitly removed millions of identical rows, it still must explicitly store the 1D Hilbert index column for every remaining parent cell. 
+For the `q2500` quantized dataset, Zarr's file size (1.7 MB) is actually smaller than the compacted Parquet file (2.8 MB) (see Figure 2). This is because Zarr requires a dense, regular grid; it stores all 466 million pixels and relies on algorithms like ZSTD or DEFLATE to compress them, which is incredibly efficient when locations are implied by position. Parquet requires 2.8 MB because, even though Quadtree Compaction explicitly removed millions of identical rows, it still must explicitly store the 1D Hilbert index column for every remaining parent cell. 
 
 Furthermore, Zarr's default compression traverses chunks in standard row-major (C-contiguous) order, which breaks spatial locality at the end of every line and reduces ZSTD efficiency. Reordering the 2D chunk bytes along a Hilbert curve via a custom `numcodecs` filter prior to compression would maximise the run-length of identical values, potentially improving Zarr's compression ratio to match Parquet without altering the dense array structure.
 
@@ -227,6 +225,17 @@ uv run python scripts/visualize.py
 - [4] Apache Parquet: https://parquet.apache.org/
 - [5] DuckDB: https://duckdb.org/
 - [6] Polars: https://pola.rs/
+- [7] Hilbert Curve: https://en.wikipedia.org/wiki/Hilbert_curve
+- [8] zarrs Rust Crate: https://crates.io/crates/zarrs
+- [9] geo-rasterize Rust Crate: https://crates.io/crates/geo-rasterize
+- [10] rayon Rust Crate: https://crates.io/crates/rayon
+- [11] Zarr V3 Sharding Specification: https://zarr.dev/zeps/draft/ZEP0002.html
+- [12] Lance Format: https://lancedb.github.io/lance/
+- [13] GDAL: https://gdal.org/
+- [14] Xarray: https://docs.xarray.dev/
+
+---
+*Transparency Note: The code, benchmarking, and prose in this technical exposition were developed with the assistance of Gemini, an AI engineering agent.*ent.*/
 - [7] Hilbert Curve: https://en.wikipedia.org/wiki/Hilbert_curve
 - [8] zarrs Rust Crate: https://crates.io/crates/zarrs
 - [9] geo-rasterize Rust Crate: https://crates.io/crates/geo-rasterize
