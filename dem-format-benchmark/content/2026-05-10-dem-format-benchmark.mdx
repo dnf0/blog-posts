@@ -7,7 +7,7 @@ description: "An empirical benchmark of architectural approaches for synchronous
 
 # Effective Querying of Global Multi-Dimensional Data Sets
 
-*May 10, 2026 • Tags: `geospatial`, `python`, `rust`, `zarr`, `polars`, `benchmarking`, `data-engineering`*
+*May 10, 2026 • 18 min read • Tags: `geospatial`, `python`, `rust`, `zarr`, `polars`, `benchmarking`, `data-engineering`*
 
 <Callout type="info">
 **TL;DR:** To build a high-concurrency API capable of synchronously querying 240 TB of multi-dimensional global hazard data, we must overcome the $O(N)$ bottlenecks of traditional raster masking. After benchmarking several architectures, we found that for batch extraction of 1K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
