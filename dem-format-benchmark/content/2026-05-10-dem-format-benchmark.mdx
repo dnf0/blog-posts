@@ -92,6 +92,9 @@ However, this compaction introduces a mathematical side-effect relevant for prod
 1. **For `MAX()` and `MIN()`:** Quadtree Compaction is mathematically sound. Since a cell is only compacted if all child pixels share the exact same value, intersection guarantees the correct value. The 2.8 MB compacted file is highly efficient for extreme-value queries.
 2. **For `AVG()` and `SUM()`:** The `pixel_count` workaround fails on boundary cells, making Uncompacted Parquet the mathematically correct option. Skipping the Quadtree Compaction step ensures every pixel retains its own row. Thanks to Parquet's native ZSTD/RLE compression, an uncompacted `q2500` Hilbert file still compressed to 319 MB, retaining pixel-level analytical accuracy while supporting efficient Hash Joins.
 
+### Executing the Hash Join (The "Covering" Step)
+With the data successfully mapped to 1D integers in Parquet, querying a 2D polygon requires a preprocessing phase. I implemented a client-side region coverer that mathematically calculates the exact 1D Hilbert cells intersecting the requested polygons. The system then passes this massive list of integers to Polars or DuckDB to execute a vectorized Hash Join (e.g., `WHERE hilbert_index IN (...)`).
+
 ## Native Zarr Integration in Rust
 
 While the Parquet Hash Join is efficient, generating the Hilbert pixel masks for 1,000 polygons (the "Covering" step) took approximately 0.27 seconds, creating a preprocessing bottleneck. To achieve faster geometric extraction while maintaining raw pixel mathematical accuracy and chunked array compression, I evaluated a native Zarr approach. Bypassing the Python object overhead, I built a custom PyO3 plugin using the pure-Rust `zarrs` crate [8], combined with `geo-rasterize` [9] and `rayon` [10] for multi-threading.
@@ -152,7 +155,7 @@ This pipeline extracted 1,000 polygons in 0.24 seconds (see Figure 4). It is mat
 
 ### Scaling Performance (Batch Extractions)
 
-With the data stored as compacted 1D integers in Parquet, I implemented a client-side region coverer. The system calculates the exact Hilbert cells intersecting the requested polygons and passes that list to Polars or DuckDB to execute a vectorized Hash Join. By comparing this tabular approach against traditional geospatial masking and emerging formats, we can observe the fundamental scaling constraints of each architecture.
+By comparing these tabular and chunked approaches against traditional geospatial masking, we can observe the fundamental scaling constraints of each architecture.
 
 ![Polygon Scaling](/plots/05_scaling_polygons.png)
 *Figure 5: Scaling execution time as a function of polygon batch size. Database join logic scales sub-linearly, while traditional bounding box masks scale linearly.*
