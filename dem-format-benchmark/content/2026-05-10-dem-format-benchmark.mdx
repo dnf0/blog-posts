@@ -11,9 +11,10 @@ When accounting for the dimensionality of climate modeling—12 years, 4 emissio
 
 A primary constraint of this system is that the API must execute synchronous, low-latency extractions for batches of up to 1,000 irregular polygons at a time. If a user queries 1,000 catchments or property boundaries on a map, the hazard analytics must be returned within synchronous API timeout limits.
 
-To empirically test architectures for this challenge, we use a 6°×6° Copernicus Digital Elevation Model (DEM) [1] covering the Swiss Alps (1.7GB, ~466M pixels). By applying a `q2500` quantization (rounding elevations into 2,500m buckets), we artificially transform the varying mountain terrain into uniform blocks. 
+To empirically test architectures for this challenge, we use a 6°×6° Copernicus Digital Elevation Model (DEM) [1] covering the Swiss Alps (1.7GB, ~466M pixels). By applying a `q2500` quantization (rounding elevations into 2,500m buckets), we artificially transform the varying mountain terrain into uniform blocks (see Figure 1). 
 
 ![Quantization Comparison](/plots/00_quantization_visual.png)
+*Figure 1: Visual comparison of raw elevation data vs. `q2500` quantized terrain, simulating the blocky nature of categorical hazard models.*
 
 This provides a reasonable approximation of the categorical nature of global hazard data (such as flood models or climate bands), allowing us to rigorously benchmark how different formats handle spatial scaling.
 
@@ -46,8 +47,9 @@ This linear scaling is insufficient for synchronous Web API constraints, necessi
 ## Tabular Joins and the Coordinate Tax
 
 ![Storage size by format](/plots/01_storage_size.png)
+*Figure 2: Storage footprint of different architectural formats, illustrating the impact of the Coordinate Tax and Quadtree Compaction.*
 
-An alternative approach is treating spatial data as tabular data. By flattening the data into a columnar format like Parquet [4], we can utilize relational database engines like DuckDB [5] or Polars [6].
+An alternative approach is treating spatial data as tabular data (see Figure 2). By flattening the data into a columnar format like Parquet [4], we can utilize relational database engines like DuckDB [5] or Polars [6].
 
 A known limitation of this approach is the "Coordinate Tax". Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or WKB geometries) for every pixel. This introduces significant storage overhead. A flat Parquet file for the proxy DEM required hundreds of megabytes.
 
@@ -94,8 +96,9 @@ SELECT band_value FROM read_parquet('dem.parquet') WHERE hilbert_index IN (...)
 ```
 
 ![Polygon Scaling](/plots/05_scaling_polygons.png)
+*Figure 3: Scaling execution time as a function of polygon batch size. Database join logic scales sub-linearly, while traditional bounding box masks scale linearly.*
 
-As seen in the scaling chart, the database query step (the Hash Join) scales sub-linearly (empirically $O(N^{0.83})$). Polars processed the database query for 1,000 polygons in 0.18 seconds. 
+As seen in the scaling chart (see Figure 3), the database query step (the Hash Join) scales sub-linearly (empirically $O(N^{0.83})$). Polars processed the database query for 1,000 polygons in 0.18 seconds. 
 
 This is primarily because 118 million raw DEM pixels were compacted to 500,000 parent cells, mathematically shrinking the problem space before the join operation.
 
@@ -124,9 +127,9 @@ Bypassing the Python object overhead, we built a custom PyO3 plugin using the pu
 **Performance:** The Rust binary reads the `.zarray` metadata directly, traces the pixel bounds for every polygon using the pure-Rust rasterizer, fetches the necessary bytes from the chunked Zarr array, and tallies the result natively. 
 
 ![Polygon Extraction Latency](/plots/04_polygon_latency.png)
-*(Note: Hatched bars indicate architectures that timed out and failed to complete within the strict 30-second synchronous API constraint).*
+*Figure 4: Median extraction latency for 1,000 polygons across evaluated architectures. (Note: Hatched bars indicate architectures that timed out and failed to complete within the strict 30-second synchronous API constraint).*
 
-This pipeline extracted 1,000 polygons in 0.24 seconds. It is mathematically a linear $O(N)$ operation. However, because the geometric masking was shifted into native Rust structs operating in the CPU's L1 cache, the constant factor is sufficiently small that the scaling curve remains low relative to traditional methods.
+This pipeline extracted 1,000 polygons in 0.24 seconds (see Figure 4). It is mathematically a linear $O(N)$ operation. However, because the geometric masking was shifted into native Rust structs operating in the CPU's L1 cache, the constant factor is sufficiently small that the scaling curve remains low relative to traditional methods.
 
 **Cloud Latency Considerations:** This 0.24-second execution was run locally. Prior to each benchmark run, the OS page cache was explicitly cleared to ensure a "cold start." However, within a massive batch execution, significant intra-run caching occurs. Because the 6°×6° proxy DEM generates only ~1,700 Zarr chunks, querying thousands of localized polygons mathematically guarantees that the same chunks are accessed repeatedly. The first few thousand polygons pull the entire dataset into RAM, allowing subsequent polygons to read from a "hot cache." In a true 240 TB global deployment, querying thousands of disparate polygons globally would trigger constant cache misses, forcing continuous network I/O. While S3 performance was not empirically benchmarked, Zarr's architecture is positioned to mitigate this cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files, whereas Zarr uses a single JSON metadata file. Because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could execute concurrent HTTP Range requests for the exact chunks needed.
 
@@ -183,9 +186,10 @@ A common critique of Zarr is that it suffers from "overfetching" (Read Amplifica
 
 While this is true, it is a paradox that Parquet and Lance actually overfetch *more* data for 2D geometries. Columnar formats compress data into discrete blocks (e.g., 1MB Parquet Pages). To read a single row, the database must download and decompress the entire 1MB Page. Because a 2D polygon fragments into thousands of disconnected 1D Hilbert segments, those segments scatter across dozens of different compression pages on disk. 
 
-To empirically prove this, we tracked the exact disk I/O required to extract a single polygon requiring just **23 KB** of raw pixel data:
+To empirically prove this, we tracked the exact disk I/O required to extract a single polygon requiring just **23 KB** of raw pixel data (see Figure 5):
 
 ![Overfetch Comparison](/plots/06_overfetch_comparison.png)
+*Figure 5: Log-scaled comparison of the uncompressed data fetched by Zarr (at various 2D chunk sizes) versus Parquet (1D Row Groups) to extract a 23 KB polygon.*
 
 *   **Zarr (512x512 chunks):** Touched 1 chunk, downloading **0.50 MB** of uncompressed data.
 *   **Parquet (Row Groups):** The 1D Hilbert line wandered so widely that the polygon's min/max bounds spanned 735 different Parquet Row Groups. DuckDB was forced to download and decompress **689 MB** of irrelevant data just to find the 23 KB it needed!
