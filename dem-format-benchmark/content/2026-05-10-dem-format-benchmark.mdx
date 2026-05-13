@@ -5,6 +5,8 @@ tags: [geospatial, python, rust, zarr, polars, benchmarking]
 description: "An empirical benchmark of architectural approaches for synchronously querying large batches of polygons against global, multi-dimensional hazard datasets."
 ---
 
+# How to Query a Global Multi-Dimensional Hazard Dataset
+
 The production requirement is to build a high-concurrency web API serving global climate hazard data. The spatial resolution is 30m across all of Earth's landmass, equating to approximately 166 billion pixels per layer.
 
 When accounting for the dimensionality of climate modeling—12 years, 4 emissions scenarios, 5 return periods, and 3 percentiles—the dataset expands to 720 distinct layers per spatial pixel. This results in a multi-dimensional data cube containing over 120 trillion data points and exceeding 240 Terabytes in uncompressed size.
