@@ -10,21 +10,21 @@ description: "An empirical benchmark of architectural approaches for synchronous
 *May 10, 2026 • 18 min read • Tags: `geospatial`, `python`, `rust`, `zarr`, `polars`, `benchmarking`, `data-engineering`*
 
 <Callout type="info">
-**TL;DR:** To build a high-concurrency API capable of synchronously querying 240 TB of multi-dimensional global hazard data, we must overcome the $O(N)$ bottlenecks of traditional raster masking. After benchmarking several architectures, we found that for batch extraction of 1K+ exclusive (i.e., non-overlapping) polygons representing distinct queries, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
+**TL;DR:** To build a high-concurrency API capable of synchronously querying 240 TB of multi-dimensional global hazard data, I must overcome the $O(N)$ bottlenecks of traditional raster masking. After benchmarking several architectures, I found that for batch extraction of 1K+ exclusive (i.e., non-overlapping) polygons representing distinct queries, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
 </Callout>
 
-The overarching objective of this engineering initiative is to design and build a high-concurrency web API (Application Programming Interface) capable of serving global climate hazard data at scale. The physical scope of this task is massive: the target spatial resolution is 30m across all of Earth's landmass, which equates to approximately 166 billion pixels per layer. 
+The overarching objective of this engineering initiative is to design and build a high-concurrency web API capable of serving global climate hazard data at scale. The physical scope of this task is massive: the target spatial resolution is 30m across all of Earth's landmass, which equates to approximately 166 billion pixels per layer. 
 
-When factoring in the dimensionality required by modern climate modeling—spanning 12 years, 4 emissions scenarios, 5 return periods, and 3 percentiles—the dataset expands to 720 distinct layers per spatial pixel. This results in a multi-dimensional data cube containing over 120 trillion data points, exceeding 240 Terabytes in its uncompressed state.
+When factoring in the dimensionality required by modern climate modelling. For instance in my current role I'm working with data that spans 12 years for emission scenarios, 5 return periods, and 3 percentiles. I'm working with data that expands to 700 distinct layers per spatial pixel. This results in a multi-dimensional data cube containing over 120 trillion data points, exceeding 240 Terabytes in its uncompressed state.
 
-A critical constraint of this API is the requirement for synchronous, low-latency execution. Specifically, the system must process batch extractions of up to 1,000 irregular polygons simultaneously. If an end-user queries 1,000 distinct catchments or property boundaries on a map, the hazard analytics for all 1,000 polygons must be calculated and returned within standard synchronous API timeout limits.
+A critical constraint of this API is the requirement for synchronous, low-latency execution. Specifically I am working on a system which must process batch extractions of thousands of irregular polygons simultaneously. If an end-user queries 1,000 distinct catchments or property boundaries on a map, the hazard analytics for all 1,000 polygons must be calculated and returned within standard synchronous API timeout limits.
 
-To empirically test and benchmark architectures capable of meeting these strict constraints, we utilize a 6°×6° Copernicus Digital Elevation Model (DEM) [1] covering the Swiss Alps (1.7GB, ~466M pixels) as our proxy dataset. Because global hazard data (such as flood inundation models or climate classification bands) is inherently categorical, we artificially simulate this data profile by applying multiple levels of quantization (`q100`, `q1000`, and `q2500`). These quantization passes round the continuous elevation values into distinct buckets, transforming the highly variable mountain terrain into uniform spatial blocks (see Figure 1). 
+To empirically test and benchmark architectures capable of meeting these strict constraints, I utilise a 6°×6° Copernicus Digital Elevation Model (DEM) [1] covering the Swiss Alps (1.7GB, ~466M pixels) as my proxy dataset. Because global hazard data (such as flood inundation models or climate classification bands) is inherently categorical, I artificially simulate this data profile by applying multiple levels of quantization (`q100`, `q1000`, and `q2500`). These quantization passes round the continuous elevation values into distinct buckets, transforming the highly variable mountain terrain into uniform spatial blocks (see Figure 1). 
 
 ![Quantization Comparison](/plots/00_quantization_visual.png)
 *Figure 1: Visual comparison of raw elevation data vs. `q2500` quantized terrain, illustrating the transformation into smooth, uniform blocks.*
 
-We evaluate multiple quantizations to artificially control the spatial contiguity of the data. A fine `q100` quantization produces highly volatile, fragmented regions, while a coarse `q2500` quantization produces massive, smooth, uniform blocks. This allows us to rigorously benchmark how different compression algorithms (like Quadtree Compaction and Run-Length Encoding) scale when encountering varying levels of physical spatial contiguity.
+I evaluate multiple quantizations to artificially control the spatial contiguity of the data. A fine `q100` quantization produces highly volatile, fragmented regions, while a coarse `q2500` quantization produces massive, smooth, uniform blocks. This allows me to rigorously benchmark how different compression algorithms (like Quadtree Compaction and Run-Length Encoding) scale when encountering varying levels of physical spatial contiguity.
 
 ## Table of Contents
 - [Benchmark Environment & Hardware Constraints](#benchmark-environment--hardware-constraints)
@@ -48,23 +48,23 @@ We evaluate multiple quantizations to artificially control the spatial contiguit
 To ensure reproducibility and transparency, it is critical to define the constraints of the benchmark environment:
 *   **Hardware:** Apple MacBook M4, 12 cores, 24 GB RAM.
 *   **Storage:** Local NVMe SSD.
-*   **Concurrency Model:** To ensure a fair architectural comparison, we explicitly bypassed the Python Global Interpreter Lock (GIL) wherever possible. For the Rasterio benchmark, we utilised Python's `ThreadPoolExecutor` because Rasterio's underlying C++ bindings release the GIL during masking operations, allowing it to utilize all 12 cores. The pure-Rust backend (`zarrs` and `geo-rasterize`) and the Hilbert coverer (`polars_hilbert`) explicitly utilised multi-threading via the `rayon` crate. DuckDB and Polars naturally utilised multi-threading for their tabular Hash Joins. Only the Python-native `xarray` operations remained bound by single-threaded execution loops. The fact that the 12-core pure-Rust Zarr implementation massively outperformed the 12-core Python/C++ Rasterio implementation highlights the severe overhead of Python object instantiation and serialization, even when the GIL is bypassed. 
+*   **Concurrency Model:** To ensure a fair architectural comparison, I explicitly bypassed the Python Global Interpreter Lock (GIL) wherever possible. For the Rasterio benchmark, I utilised Python's `ThreadPoolExecutor` because Rasterio's underlying C++ bindings release the GIL during masking operations, allowing it to utilise all 12 cores. The pure-Rust backend (`zarrs` and `geo-rasterize`) and the Hilbert coverer (`polars_hilbert`) explicitly utilised multi-threading via the `rayon` crate. DuckDB and Polars naturally utilised multi-threading for their tabular Hash Joins. Only the Python-native `xarray` operations remained bound by single-threaded execution loops. The fact that the 12-core pure-Rust Zarr implementation massively outperformed the 12-core Python/C++ Rasterio implementation highlights the severe overhead of Python object instantiation and serialization, even when the GIL is bypassed. 
 
 ## Methodology: Evaluated Architectures
-To fully understand the results, it is essential to detail the different architectural combinations evaluated in this benchmark. We tested distinct pairs of data formats and query engines to extract data for geometric polygons:
+To fully understand the results, it is essential to detail the different architectural combinations evaluated in this benchmark. I tested distinct pairs of data formats and query engines to extract data for geometric polygons:
 
-1. **Rasterio + COG:** The industry-standard Python bindings for the C++ GDAL (Geospatial Data Abstraction Library) [13] library querying Cloud Optimized GeoTIFFs (COGs) [2]. It extracts data by individually masking the bounding box of each polygon. 
+1. **Rasterio + COG:** The industry-standard Python bindings for the C++ GDAL [13] library querying Cloud Optimised GeoTIFFs (COGs) [2]. It extracts data by individually masking the bounding box of each polygon. 
 2. **Xarray + Zarr:** A popular Python data science library [14] used to lazily load and sequentially query N-dimensional Zarr arrays [3]. 
 3. **DuckDB + Parquet:** An embedded analytical SQL database written in C++ [5] executing vectorized "Hash Joins" over the 1D columnar Parquet format [4].
-4. **Polars + Parquet:** A lightning-fast DataFrame library written in Rust [6], utilized here to perform the exact same Hash Joins over Parquet as DuckDB, serving as a secondary validation of the columnar tabular approach.
-5. **Pure Rust Zarr (`zarrs` + Zarr):** A custom backend we built natively in Rust. It bypasses Python and C++ entirely, directly fetching byte-ranges from Zarr chunks using the `zarrs` crate [8] and geometrically masking them using the `geo-rasterize` crate [9].
-6. **DuckDB + Lance & Lance Scanner:** We queried the Lance data format [12]—optimized for rapid random access of data blobs for artificial intelligence (AI) models—using both DuckDB Hash Joins and the native Lance Scanner query engine.
+4. **Polars + Parquet:** A lightning-fast DataFrame library written in Rust [6], utilised here to perform the exact same Hash Joins over Parquet as DuckDB, serving as a secondary validation of the columnar tabular approach.
+5. **Pure Rust Zarr (`zarrs` + Zarr):** A custom backend I built natively in Rust. It bypasses Python and C++ entirely, directly fetching byte-ranges from Zarr chunks using the `zarrs` crate [8] and geometrically masking them using the `geo-rasterize` crate [9].
+6. **DuckDB + Lance & Lance Scanner:** I queried the Lance data format [12]—optimised for rapid random access of data blobs for artificial intelligence (AI) models—using both DuckDB Hash Joins and the native Lance Scanner query engine.
 
 ## Exploring the Ecosystem
 
 The standard approach to managing spatial raster data involves N-dimensional arrays, predominantly Cloud Optimised GeoTIFFs (COG) [2] or cloud-native Zarr stores [3]. 
 
-In these formats, data is chunked into 2D or 3D grids (e.g., 512x512 pixels) and compressed using algorithms like Zstandard (ZSTD) or DEFLATE. They are highly efficient at storage because the X and Y coordinates are implied by the pixel's position in the grid array. The highly quantized DEM proxy compressed to 2.4 MB in COG and 1.7 MB in Zarr.
+In these formats, data is chunked into 2D or 3D grids (e.g., 512x512 pixels) and compressed using algorithms like ZSTD or DEFLATE. They are highly efficient at storage because the X and Y coordinates are implied by the pixel's position in the grid array. The highly quantized DEM proxy compressed to 2.4 MB in COG and 1.7 MB in Zarr.
 
 However, their query engines are generally not optimised for large-batch polygon extractions. When querying 1,000 irregular polygons using standard ecosystem tools (such as `rasterio.mask` for COGs or `rioxarray.clip` for Zarr), the system performs sequential raster masking. 
 
@@ -87,11 +87,11 @@ This linear scaling is insufficient for synchronous Web API constraints, necessi
 ![Storage size by format](/plots/01_storage_size.png)
 *Figure 2: Storage footprint of different architectural formats, illustrating the impact of the Coordinate Tax and Quadtree Compaction.*
 
-An alternative approach is treating spatial data as tabular data (see Figure 2). By flattening the data into a columnar format like Parquet [4], we can utilize relational database engines like DuckDB [5] or Polars [6].
+An alternative approach is treating spatial data as tabular data (see Figure 2). By flattening the data into a columnar format like Parquet [4], I can utilise relational database engines like DuckDB [5] or Polars [6].
 
-A known limitation of this approach is the "Coordinate Tax". Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or Well-Known Binary (WKB) geometries) for every pixel. This introduces significant storage overhead. An uncompacted, flat Parquet file with raw explicit X/Y coordinates for the 6°×6° proxy DEM required over 1.1 GB.
+A known limitation of this approach is the "Coordinate Tax". Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or WKB geometries) for every pixel. This introduces significant storage overhead. An uncompacted, flat Parquet file with raw explicit X/Y coordinates for the 6°×6° proxy DEM required over 1.1 GB.
 
-To eliminate this overhead, we utilised a Native 2D Hilbert Curve [7]. By mapping the global 1-arc-second grid `(col, row)` to a 1D Hilbert integer using bitwise XOR rotations, the index replaces the explicit location coordinates.
+To eliminate this overhead, I utilised a Native 2D Hilbert Curve [7]. By mapping the global 1-arc-second grid `(col, row)` to a 1D Hilbert integer using bitwise XOR rotations, the index replaces the explicit location coordinates.
 
 ### Quadtree Compaction
 
@@ -105,7 +105,7 @@ Applying this Quadtree Compaction to the `q2500` Hilbert Parquet file reduced th
 
 ### Evaluating Vectorized Hash Joins
 
-With the data stored as compacted 1D integers in Parquet, we implemented a client-side region coverer. The system calculates the exact Hilbert cells intersecting the requested polygons and passes that list to Polars or DuckDB to execute a vectorized Hash Join.
+With the data stored as compacted 1D integers in Parquet, I implemented a client-side region coverer. The system calculates the exact Hilbert cells intersecting the requested polygons and passes that list to Polars or DuckDB to execute a vectorized Hash Join.
 
 ![Polygon Scaling](/plots/05_scaling_polygons.png)
 *Figure 3: Scaling execution time as a function of polygon batch size. Database join logic scales sub-linearly, while traditional bounding box masks scale linearly.*
@@ -122,19 +122,19 @@ When executing an `AVG(band_value)` query, SQL treats each row equally. In a com
 
 If a polygon covers both regions, the database returns two rows. The single pixel will disproportionately affect the average elevation because the 1,024 pixels were compacted into a single row. Furthermore, a `pixel_count` workaround fails on polygon boundaries because it over-weights partially touched cells.
 
-**The Boundary Paradox in Practice:** We conducted an empirical equivalence test comparing Rasterio's C++ GDAL heuristics with a pure-Rust geometric masking approach. For blocky polygons, the outputs were identical (Median Absolute Error of 0.0000 metres). However, for linear polygons with high perimetre-to-area ratios (such as a 10m buffered pipeline), floating-point boundary tie-breakers become significant. GDAL's Centre-Point heuristics might include 180 pixels, while an "All-Touched" equivalent includes 540 pixels—a 200% discrepancy that alters the resulting average.
+**The Boundary Paradox in Practice:** I conducted an empirical equivalence test comparing Rasterio's C++ GDAL heuristics with a pure-Rust geometric masking approach. For blocky polygons, the outputs were identical (Median Absolute Error of 0.0000 metres). However, for linear polygons with high perimetre-to-area ratios (such as a 10m buffered pipeline), floating-point boundary tie-breakers become significant. GDAL's Centre-Point heuristics might include 180 pixels, while an "All-Touched" equivalent includes 540 pixels—a 200% discrepancy that alters the resulting average.
 
 **Structuring Parquet for Analytics:** The optimal Parquet structure depends on the SQL aggregation used:
 1. **For `MAX()` and `MIN()`:** Quadtree Compaction is mathematically sound. Since a cell is only compacted if all child pixels share the exact same value, intersection guarantees the correct value. The 2.8 MB compacted file is highly efficient for extreme-value queries.
-2. **For `AVG()` and `SUM()`:** The `pixel_count` workaround fails on boundary cells, making Uncompacted Parquet the mathematically correct option. Skipping the Quadtree Compaction step ensures every pixel retains its own row. Thanks to Parquet's native ZSTD/RLE (Run-Length Encoding) compression, an uncompacted `q2500` Hilbert file still compressed to 319 MB, retaining pixel-level analytical accuracy while supporting efficient Hash Joins.
+2. **For `AVG()` and `SUM()`:** The `pixel_count` workaround fails on boundary cells, making Uncompacted Parquet the mathematically correct option. Skipping the Quadtree Compaction step ensures every pixel retains its own row. Thanks to Parquet's native ZSTD/RLE compression, an uncompacted `q2500` Hilbert file still compressed to 319 MB, retaining pixel-level analytical accuracy while supporting efficient Hash Joins.
 
 ## Native Zarr Integration in Rust
 
 While the Parquet Hash Join is efficient, generating the Hilbert pixel masks for 1,000 polygons (the "Covering" step) took approximately 0.27 seconds, creating a preprocessing bottleneck. 
 
-To achieve faster geometric extraction while maintaining raw pixel mathematical accuracy and chunked array compression, we evaluated a native Zarr approach.
+To achieve faster geometric extraction while maintaining raw pixel mathematical accuracy and chunked array compression, I evaluated a native Zarr approach.
 
-Bypassing the Python object overhead, we built a custom PyO3 plugin using the pure-Rust `zarrs` crate [8], combined with `geo-rasterize` [9] and `rayon` [10] for multi-threading.
+Bypassing the Python object overhead, I built a custom PyO3 plugin using the pure-Rust `zarrs` crate [8], combined with `geo-rasterize` [9] and `rayon` [10] for multi-threading.
 
 **Performance:** The Rust binary reads the `.zarray` metadata directly, traces the pixel bounds for every polygon using the pure-Rust rasterizer, fetches the necessary bytes from the chunked Zarr array, and tallies the result natively. 
 
@@ -143,14 +143,14 @@ Bypassing the Python object overhead, we built a custom PyO3 plugin using the pu
 
 This pipeline extracted 1,000 polygons in 0.24 seconds (see Figure 4). It is mathematically a linear $O(N)$ operation. However, because the geometric masking was shifted into native Rust structs operating in the CPU's L1 cache, the constant factor is sufficiently small that the scaling curve remains low relative to traditional methods.
 
-**Cloud Latency Considerations:** This 0.24-second execution was run locally. Prior to each benchmark run, the OS page cache was explicitly cleared to ensure a "cold start." Because the 6°×6° proxy DEM generates only ~1,700 Zarr chunks, we specifically capped the benchmark at 1,000 polygons. Querying larger batches (e.g., 100,000 polygons) on this localized dataset would mathematically guarantee that the same chunks are accessed repeatedly, transforming the test into an artificial "hot cache" in-memory benchmark. In a true 240 TB global deployment, querying thousands of disparate polygons globally would trigger constant cache misses, forcing continuous network I/O. While S3 performance was not empirically benchmarked, Zarr's architecture is positioned to mitigate this cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files, whereas Zarr uses a single JSON metadata file. Because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could execute concurrent HTTP Range requests for the exact chunks needed.
+**Cloud Latency Considerations:** This 0.24-second execution was run locally. Prior to each benchmark run, the OS page cache was explicitly cleared to ensure a "cold start." Because the 6°×6° proxy DEM generates only ~1,700 Zarr chunks, I specifically capped the benchmark at 1,000 polygons. Querying larger batches (e.g., 100,000 polygons) on this localized dataset would mathematically guarantee that the same chunks are accessed repeatedly, transforming the test into an artificial "hot cache" in-memory benchmark. In a true 240 TB global deployment, querying thousands of disparate polygons globally would trigger constant cache misses, forcing continuous network I/O. While S3 performance was not empirically benchmarked, Zarr's architecture is positioned to mitigate this cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files, whereas Zarr uses a single JSON metadata file. Because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could execute concurrent HTTP Range requests for the exact chunks needed.
 
 Because it operates natively on the raw pixels rather than compacted cells, this approach is immune to the Parquet area-weighting flaw, yielding correct `AVG()` aggregations natively.
 
 ### Comparing Zarr and Parquet Compression
 Zarr's file size (1.7 MB) is actually smaller than the compacted Parquet file (2.8 MB). This is because Zarr requires a dense, regular grid; it stores all 466 million pixels and relies on algorithms like ZSTD or DEFLATE to compress them, which is incredibly efficient when locations are implied by position. Parquet requires 2.8 MB because, even though Quadtree Compaction explicitly removed millions of identical rows, it still must explicitly store the 1D Hilbert index column for every remaining parent cell. 
 
-Furthermore, Zarr's default compression traverses chunks in standard row-major (C-contiguous) order, which breaks spatial locality at the end of every line and reduces ZSTD efficiency. Reordering the 2D chunk bytes along a Hilbert curve via a custom `numcodecs` filter prior to compression would maximize the run-length of identical values, potentially improving Zarr's compression ratio to match Parquet without altering the dense array structure.
+Furthermore, Zarr's default compression traverses chunks in standard row-major (C-contiguous) order, which breaks spatial locality at the end of every line and reduces ZSTD efficiency. Reordering the 2D chunk bytes along a Hilbert curve via a custom `numcodecs` filter prior to compression would maximise the run-length of identical values, potentially improving Zarr's compression ratio to match Parquet without altering the dense array structure.
 
 ## Spatial Chunking vs. Row-Level Random Access
 
@@ -160,14 +160,14 @@ The distinction between Lance and Zarr for polygon queries relies on the differe
 
 When querying a polygon, the requirement is a clustered geographic neighborhood. Zarr is optimised for this via 2D spatial tiles (e.g., 512x512 pixels). The Rust backend fetches the required 2D tile via a single HTTP Range request. Once decompressed in memory, all necessary pixels are spatially contiguous.
 
-Lance and Parquet are 1D columnar formats. Querying a polygon requires translating the 2D shape into thousands of 1D Hilbert integers. Because the irregular polygon boundary cuts across the Hilbert curve, these integers are fragmented, requiring Lance to execute thousands of non-contiguous row fetches. The overhead of assembling these fragmented rows limits its performance for massive batch polygon extractions (~0.46 seconds for 1K polygons, compared to Zarr's 0.24 seconds). Furthermore, because Lance prioritizes raw memory layouts to guarantee microsecond seek times rather than utilizing aggressive Dictionary and Run-Length Encodings like Parquet, its storage footprint for dense scalar grids is significantly larger (the uncompacted X/Y test dataset bloated to 4.7 GB in Lance compared to 528 MB in Parquet).
+Lance and Parquet are 1D columnar formats. Querying a polygon requires translating the 2D shape into thousands of 1D Hilbert integers. Because the irregular polygon boundary cuts across the Hilbert curve, these integers are fragmented, requiring Lance to execute thousands of non-contiguous row fetches. The overhead of assembling these fragmented rows limits its performance for massive batch polygon extractions (~0.46 seconds for 1K polygons, compared to Zarr's 0.24 seconds). Furthermore, because Lance prioritises raw memory layouts to guarantee microsecond seek times rather than utilising aggressive Dictionary and Run-Length Encodings like Parquet, its storage footprint for dense scalar grids is significantly larger (the uncompacted X/Y test dataset bloated to 4.7 GB in Lance compared to 528 MB in Parquet).
 
 #### The Read Amplification Paradox (Overfetching)
 A common critique of Zarr is that it suffers from "overfetching" (Read Amplification). If a polygon only touches 10 pixels within a 512x512 chunk, Zarr still must download and decompress the entire 262,144-pixel chunk. 
 
 While this is true, it is a paradox that Parquet and Lance actually overfetch *more* data for 2D geometries. Columnar formats compress data into discrete blocks (e.g., 1MB Parquet Pages). To read a single row, the database must download and decompress the entire 1MB Page. Because a 2D polygon fragments into thousands of disconnected 1D Hilbert segments, those segments scatter across dozens of different compression pages on disk. 
 
-To empirically prove this, we tracked the exact disk I/O required to extract a single polygon requiring just **23 KB** of raw pixel data (see Figure 5):
+To empirically prove this, I tracked the exact disk I/O required to extract a single polygon requiring just **23 KB** of raw pixel data (see Figure 5):
 
 ![Overfetch Comparison](/plots/06_overfetch_comparison.png)
 *Figure 5: Log-scaled comparison of the uncompressed data fetched by Zarr (at various 2D chunk sizes) versus Parquet (1D Row Groups) to extract a 23 KB polygon.*
@@ -175,13 +175,13 @@ To empirically prove this, we tracked the exact disk I/O required to extract a s
 *   **Zarr (512x512 chunks):** Touched 1 chunk, downloading **0.50 MB** of uncompressed data.
 *   **Parquet (Row Groups):** The 1D Hilbert line wandered so widely that the polygon's min/max bounds spanned 735 different Parquet Row Groups. DuckDB was forced to download and decompress **689 MB** of irrelevant data just to find the 23 KB it needed!
 
-**The Parquet Zone Map Trap:** Why did DuckDB read 689 MB of data? Parquet uses "Zone Maps" (min/max metadata per Row Group) to quickly skip irrelevant data (Predicate Pushdown). When DuckDB queries the polygon, it looks at the absolute lowest and highest Hilbert integer inside the polygon and tells Parquet to fetch every Row Group that falls within that range. Because the 1D Hilbert curve snakes back and forth across the 2D map, a tiny geographic polygon can span a massive numeric range. DuckDB fetched 735 Row Groups, decompressed them into RAM, and then realized 99% of the rows belonged to neighboring towns outside the polygon. 
+**The Parquet Zone Map Trap:** Why did DuckDB read 689 MB of data? Parquet uses "Zone Maps" (min/max metadata per Row Group) to quickly skip irrelevant data (Predicate Pushdown). When DuckDB queries the polygon, it looks at the absolute lowest and highest Hilbert integer inside the polygon and tells Parquet to fetch every Row Group that falls within that range. Because the 1D Hilbert curve snakes back and forth across the 2D map, a tiny geographic polygon can span a massive numeric range. DuckDB fetched 735 Row Groups, decompressed them into RAM, and then realised 99% of the rows belonged to neighboring towns outside the polygon. 
 
-**The Coordinate Tax Reconsidered (2D Zone Maps):** Is there a way to solve this Parquet overfetching without abandoning the format? Yes, but it requires paying the "Coordinate Tax" we initially tried to avoid. If we add the explicit X and Y coordinates (or a coarse 2D `grid_id`) back into the uncompacted `q2500` Hilbert Parquet file, the file size bloats from 319 MB to roughly 528 MB. However, because Parquet maintains Zone Maps for *every* column, we can structure our query to include a 2D bounding box: `WHERE x >= min_x AND x <= max_x AND z_index IN (...)`. DuckDB will evaluate the X/Y Zone Maps first, allowing it to instantly prune the hundreds of irrelevant Row Groups that the 1D Hilbert index dragged in. We empirically tested this, and DuckDB's scan time dropped to near zero. This represents the ultimate architectural tradeoff: you can pay for storage (528 MB for the uncompacted Parquet file with X/Y coordinates) to fix your I/O, or you can use Native Zarr to keep the file size tiny (1.7 MB for `q2500` Zarr) while inherently maintaining 2D chunk bounds.
+**The Coordinate Tax Reconsidered (2D Zone Maps):** Is there a way to solve this Parquet overfetching without abandoning the format? Yes, but it requires paying the "Coordinate Tax" I initially tried to avoid. If we add the explicit X and Y coordinates (or a coarse 2D `grid_id`) back into the uncompacted `q2500` Hilbert Parquet file, the file size bloats from 319 MB to roughly 528 MB. However, because Parquet maintains Zone Maps for *every* column, I can structure my query to include a 2D bounding box: `WHERE x >= min_x AND x <= max_x AND z_index IN (...)`. DuckDB will evaluate the X/Y Zone Maps first, allowing it to instantly prune the hundreds of irrelevant Row Groups that the 1D Hilbert index dragged in. I empirically tested this, and DuckDB's scan time dropped to near zero. This represents the ultimate architectural tradeoff: you can pay for storage (528 MB for the uncompacted Parquet file with X/Y coordinates) to fix your I/O, or you can use Native Zarr to keep the file size tiny (1.7 MB for `q2500` Zarr) while inherently maintaining 2D chunk bounds.
 
 Therefore, to read a single polygon, a columnar database relying solely on a 1D spatial index downloads and decompresses significantly more irrelevant data blocks than Zarr, which cleanly bounds the overfetching to a few 2D spatial chunks.
 
-**Tuning the Spatial Chunk Size (Read vs. Request Amplification):** It is important to note that the 512x512 chunk size is simply a default designed to balance compression ratios with read speeds. If a production API primarily queries very small polygons, fetching a 0.50 MB chunk is still an overfetch. The logical solution is to configure the Zarr writer to use smaller chunks. In our simulation for the exact same 23 KB polygon, configuring Zarr with `chunks=(128, 128)` caused it to touch 4 chunks, reducing the total download size to just **0.12 MB**. 
+**Tuning the Spatial Chunk Size (Read vs. Request Amplification):** It is important to note that the 512x512 chunk size is simply a default designed to balance compression ratios with read speeds. If a production API primarily queries very small polygons, fetching a 0.50 MB chunk is still an overfetch. The logical solution is to configure the Zarr writer to use smaller chunks. In my simulation for the exact same 23 KB polygon, configuring Zarr with `chunks=(128, 128)` caused it to touch 4 chunks, reducing the total download size to just **0.12 MB**. 
 
 However, doing so introduces the fundamental trade-off of cloud I/O: **Read Amplification vs. Request Amplification**. 
 While smaller chunks drastically reduce the number of wasted bytes downloaded, they increase the number of HTTP Range requests required to cover a polygon (e.g., 4 requests instead of 1). In cloud storage like S3, Time-To-First-Byte (TTFB) latency is exceptionally high. Making 100 small HTTP requests is almost always slower and more expensive than making 1 large HTTP request. 
@@ -192,16 +192,16 @@ Data engineers must tune the chunk size to find the exact sweet spot for their s
 
 ## Scaling Back to the Globe
 
-Returning to the original 240 TB multi-dimensional problem (720 distinct hazard layers per 30m spatial pixel), the architectural path requires evaluating the limits of modern data structures. 
+Returning to the original 240 TB multi-dimensional problem (700 distinct hazard layers per 30m spatial pixel), the architectural path requires evaluating the limits of modern data structures. 
 
-Scaling the Hilbert Parquet architecture globally introduces a hyper-dimensionality challenge. Parquet schemas are designed for narrow tables. Storing 720 layers per pixel requires either an exceptionally wide table (destroying columnar scan efficiency) or a deeply nested array structure (forcing the database to deserialize large blobs of data to read a single variable). 
+Scaling the Hilbert Parquet architecture globally introduces a hyper-dimensionality challenge. Parquet schemas are designed for narrow tables. Storing 700 layers per pixel requires either an exceptionally wide table (destroying columnar scan efficiency) or a deeply nested array structure (forcing the database to deserialize large blobs of data to read a single variable). 
 
 Conversely, Zarr natively handles N-dimensional chunking (e.g., `[layer, y, x]`). If an API request specifies a specific layer, the Rust backend calculates the 1D index for that slice and reads only the corresponding bytes, leaving the other layers untouched.
 
 ### Overcoming Cloud Storage Limits: Zarr v3 Sharding
 A final consideration for deploying a global Zarr cube is the nature of cloud object storage. 
 
-Zarr v2 stores every chunk as an individual file. A global 30m dataset with 720 layers chunked into 512x512 grids would generate billions of files. In a key-value object store like S3, this volume of files exhausts inode limits on caching layers, slows data transfer, and increases costs associated with HTTP `PUT` and `LIST` requests. 
+Zarr v2 stores every chunk as an individual file. A global 30m dataset with 700 layers chunked into 512x512 grids would generate billions of files. In a key-value object store like S3, this volume of files exhausts inode limits on caching layers, slows data transfer, and increases costs associated with HTTP `PUT` and `LIST` requests. 
 
 The standard solution is Zarr v3 Sharding [11]. Sharding introduces a two-tier hierarchy by grouping thousands of chunks into larger "Shard" files (e.g., 500 MB). A byte-offset index is appended to the end of each shard. 
 
@@ -211,17 +211,17 @@ When the Rust backend queries the globe, it:
 3. Parses the index to locate the byte-offset of the specific 512x512 inner chunk.
 4. Executes a second HTTP Range request to fetch the required bytes.
 
-This approach preserves the read performance of small chunks while drastically reducing the total number of files in the storage bucket. Furthermore, because global hazard data typically follows a "Write Once, Read Many" (WORM) lifecycle, the shard index never changes. The Rust backend can aggressively cache these indices in RAM. This entirely neutralizes the "double-fetch" penalty of Sharding, allowing all subsequent API queries to instantly locate the inner chunk and fetch the required data with a single HTTP Range request.
+This approach preserves the read performance of small chunks while drastically reducing the total number of files in the storage bucket. Furthermore, because global hazard data typically follows a "Write Once, Read Many" (WORM) lifecycle, the shard index never changes. The Rust backend can aggressively cache these indices in RAM. This entirely neutralises the "double-fetch" penalty of Sharding, allowing all subsequent API queries to instantly locate the inner chunk and fetch the required data with a single HTTP Range request.
 
 ## Conclusion
 
-Building a synchronous, high-concurrency API over petabytes of spatial data requires pushing modern data engineering to its absolute limits. As we have demonstrated, relying on industry-standard GIS raster pipelines (like Rasterio and COG) introduces sequential $O(N)$ geometry masking bottlenecks that fail under the weight of massive polygon batches. 
+Building a synchronous, high-concurrency API over petabytes of spatial data requires pushing modern data engineering to its absolute limits. As I have demonstrated, relying on industry-standard GIS raster pipelines (like Rasterio and COG) introduces sequential $O(N)$ geometry masking bottlenecks that fail under the weight of massive polygon batches. 
 
 Flattening spatial arrays into 1D columnar formats like Parquet and executing vectorized Hash Joins offers a tantalizing sub-linear alternative. However, this approach forces engineers into difficult compromises. To achieve extreme compression, one must use Quadtree Compaction, which destroys the area-weighting accuracy required for rigorous `AVG()` analytics. Furthermore, mapping 2D geometries onto 1D space-filling curves triggers the "Zone Map Trap," causing catastrophic Read Amplification as the database overfetches hundreds of megabytes of fragmented row groups. Fixing this requires paying the "Coordinate Tax"—bloating the file size with explicit X/Y columns to enable 2D Zone Map pruning.
 
 Ultimately, the most elegant architecture respects the physical reality of the data. For large-scale, multi-dimensional spatial analytics, a pure-Rust backend querying sharded N-dimensional Zarr v3 arrays provides the optimal, uncompromising solution. 
 
-By aggressively tuning the spatial chunk size to match the API's expected payload, utilizing Zarr v3 Sharding to bypass cloud object storage limits, and caching the WORM index in memory to neutralize read latency, data engineers can achieve a robust balance of storage compression, mathematical accuracy, and microsecond API performance.
+By aggressively tuning the spatial chunk size to match the API's expected payload, utilising Zarr v3 Sharding to bypass cloud object storage limits, and caching the WORM index in memory to neutralise read latency, data engineers can achieve a robust balance of storage compression, mathematical accuracy, and microsecond API performance.
 
 ## Reproduce This
 
@@ -247,7 +247,7 @@ uv run python scripts/visualize.py
 - [10] rayon Rust Crate: https://crates.io/crates/rayon
 - [11] Zarr V3 Sharding Specification: https://zarr.dev/zeps/draft/ZEP0002.html
 - [12] Lance Format: https://lancedb.github.io/lance/
-- [13] GDAL (Geospatial Data Abstraction Library): https://gdal.org/
+- [13] GDAL: https://gdal.org/
 - [14] Xarray: https://docs.xarray.dev/
 
 ---
