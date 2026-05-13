@@ -30,12 +30,13 @@ To empirically test and benchmark architectures capable of meeting these strict 
 - [Exploring the Ecosystem](#exploring-the-ecosystem)
 - [Tabular Joins and the Coordinate Tax](#tabular-joins-and-the-coordinate-tax)
   - [Quadtree Compaction](#quadtree-compaction)
-  - [Evaluating Vectorized Hash Joins](#evaluating-vectorized-hash-joins)
 - [The Area-Weighting Trade-off](#the-area-weighting-trade-off)
 - [Native Zarr Integration in Rust](#native-zarr-integration-in-rust)
   - [Comparing Zarr and Parquet Compression](#comparing-zarr-and-parquet-compression)
 - [Spatial Chunking vs. Row-Level Random Access](#spatial-chunking-vs-row-level-random-access)
   - [The Read Amplification Paradox (Overfetching)](#the-read-amplification-paradox-overfetching)
+- [Evaluating Performance Across Architectures](#evaluating-performance-across-architectures)
+  - [Scaling Performance (Batch Extractions)](#scaling-performance-batch-extractions)
 - [Scaling Back to the Globe](#scaling-back-to-the-globe)
   - [Overcoming Cloud Storage Limits: Zarr v3 Sharding](#overcoming-cloud-storage-limits-zarr-v3-sharding)
 - [Conclusion](#conclusion)
@@ -82,12 +83,9 @@ This linear scaling is insufficient for synchronous Web API constraints, necessi
 
 ## Tabular Joins and the Coordinate Tax
 
-![Storage size by format](/plots/01_storage_size.png)
-*Figure 2: Storage footprint of different architectural formats, illustrating the impact of the Coordinate Tax and Quadtree Compaction.*
-
 An alternative approach is treating spatial data as tabular data. By flattening the data into a columnar format like Parquet [4], you can utilise analytical SQL engines like DuckDB [5] or DataFrame libraries like Polars [6].
 
-A known limitation of this approach is the "Coordinate Tax". Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or WKB geometries) for every pixel. This introduces significant storage overhead (see Figure 2). An uncompacted, flat Parquet file with raw explicit X/Y coordinates for the 6°×6° proxy DEM required over 1.1 GB.
+A known limitation of this approach is the "Coordinate Tax". Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or WKB geometries) for every pixel. This introduces significant storage overhead. An uncompacted, flat Parquet file with raw explicit X/Y coordinates for the 6°×6° proxy DEM required over 1.1 GB.
 
 To eliminate this overhead, I utilised a Native 2D Hilbert Curve [7]. By mapping the global 1-arc-second grid `(col, row)` to a 1D Hilbert integer using bitwise XOR rotations, the index replaces the explicit location coordinates.
 
@@ -99,27 +97,10 @@ Unlike COG and Zarr (which compress fixed blocks using DEFLATE/ZSTD), Quadtree C
 
 This process recursively ascends 16 levels of the quadtree. For uniform areas, millions of pixels collapse into larger parent cells, functioning as a 2D Run-Length Encoder. 
 
-Applying this Quadtree Compaction to the `q2500` Hilbert Parquet file reduced the file size from the 1.1 GB raw baseline down to just 2.8 MB. (Note that this compacted Parquet file is slightly larger than the `q2500` COG at 2.4 MB and Zarr at 1.7 MB, because Parquet must still explicitly store the 1D Hilbert index column for every cell, whereas N-dimensional arrays imply locations entirely by position).
+Applying this Quadtree Compaction to the `q2500` Hilbert Parquet file reduced the file size from the 1.1 GB raw baseline down to just 2.8 MB. (Note that this compacted Parquet file is slightly larger than the `q2500` COG at 2.4 MB and Zarr at 1.7 MB, because Parquet must still explicitly store the 1D Hilbert index column for every cell, whereas N-dimensional arrays imply locations entirely by position). (see Figure 2).
 
-### Evaluating Scaling Performance Across Architectures
-
-With the data stored as compacted 1D integers in Parquet, I implemented a client-side region coverer. The system calculates the exact Hilbert cells intersecting the requested polygons and passes that list to Polars or DuckDB to execute a vectorized Hash Join. 
-
-By comparing this tabular approach against traditional geospatial masking and emerging formats, we can observe the fundamental scaling constraints of each architecture.
-
-![Polygon Scaling](/plots/05_scaling_polygons.png)
-*Figure 3: Scaling execution time as a function of polygon batch size. Database join logic scales sub-linearly, while traditional bounding box masks scale linearly.*
-
-As seen in the scaling chart (see Figure 3), the performance divergence is stark:
-
-1. **Traditional GIS (Rasterio + COG):** Scales strictly linearly ($O(N)$). Sequential bounding box masking struggles under the weight of large batches, requiring 0.73 seconds for 1,000 polygons.
-2. **Tabular Data (Polars/DuckDB + Parquet):** The database query step (the Hash Join) scales sub-linearly (empirically $O(N^{0.83})$). Polars processed the database query for 1,000 polygons in just 0.18 seconds. This is primarily because 466 million raw DEM pixels were compacted down to roughly 2.6 million parent cells, mathematically shrinking the problem space before the join operation.
-3. **AI Random Access (Lance):** Lance entirely bypasses the metadata startup penalty of Parquet. For small batches (10 polygons), its random-access design executes the query almost instantly. However, as the batch scales to 1,000 polygons, the overhead of assembling thousands of fragmented rows catches up, pulling its execution time to 0.25 seconds (slightly slower than Parquet).
-4. **Native Chunking (Pure Rust Zarr):** Bypassing both SQL overhead and Python iteration, the native Rust Zarr extraction dominates the pack. It maintains a functionally flat scaling curve due to minimal constant-time overhead, completing the entire extraction for 1,000 polygons in 0.24 seconds.
-
-**Why This Matters (The Extrapolation):** At a glance, a 0.49-second difference between Rasterio (0.73s) and Zarr (0.24s) for 1,000 polygons might seem too trivial to justify an entirely new Rust-based architecture. However, this local benchmark masks a systemic failure at scale. Because Rasterio scales linearly ($O(N)$), extracting 10,000 polygons will take ~7.3 seconds, and 100,000 polygons will take ~73 seconds—completely exceeding synchronous API constraints. Conversely, Zarr's sub-linear efficiency easily absorbs substantial batches. Furthermore, Rasterio achieved 0.73 seconds on a local NVMe drive. Over a cloud network (like AWS S3), fetching data introduces Time-To-First-Byte (TTFB) latency (often ~50ms per request). Standard GIS tools querying Cloud Optimised GeoTIFFs (COGs) must download complex TIFF headers to understand the file layout before fetching the actual tiles. When processing 1,000 polygons across multiple files, Rasterio often executes these network requests sequentially, paying the 50ms TTFB penalty thousands of times. This causes cloud extraction times to increase substantially into minutes.
-
-The pure-Rust Zarr architecture is effectively immune to these cloud I/O penalties. Zarr separates its metadata from its data. The Rust backend downloads a single, instantly readable JSON metadata file. It then uses simple mathematics to calculate exactly which byte-ranges are needed for all 1,000 polygons. Because it is written in asynchronous Rust, it fires all 1,000 HTTP Range requests *concurrently*. It pays the 50ms network latency penalty exactly once, completely hiding the cloud I/O bottleneck.
+![Storage size by format](/plots/01_storage_size.png)
+*Figure 2: Storage footprint of different architectural formats, illustrating the impact of the Coordinate Tax and Quadtree Compaction.*
 
 ## The Area-Weighting Trade-off
 
@@ -142,13 +123,6 @@ While the Parquet Hash Join is efficient, generating the Hilbert pixel masks for
 To achieve faster geometric extraction while maintaining raw pixel mathematical accuracy and chunked array compression, I evaluated a native Zarr approach.
 
 Bypassing the Python object overhead, I built a custom PyO3 plugin using the pure-Rust `zarrs` crate [8], combined with `geo-rasterize` [9] and `rayon` [10] for multi-threading.
-
-**Performance:** The Rust binary reads the `.zarray` metadata directly, traces the pixel bounds for every polygon using the pure-Rust rasterizer, fetches the necessary bytes from the chunked Zarr array, and tallies the result natively. 
-
-![Polygon Extraction Latency](/plots/04_polygon_latency.png)
-*Figure 4: Median extraction latency for 1,000 polygons across evaluated architectures. (Note: Hatched bars indicate architectures that timed out and failed to complete within the strict 30-second synchronous API constraint).*
-
-This pipeline extracted 1,000 polygons in 0.24 seconds (see Figure 4). It is mathematically a linear $O(N)$ operation. However, because the geometric masking was shifted into native Rust structs operating in the CPU's L1 cache, the constant factor is sufficiently small that the scaling curve remains low relative to traditional methods.
 
 **Cloud Latency Considerations:** This 0.24-second execution was run locally. Prior to each benchmark run, the OS page cache was explicitly cleared to ensure a "cold start." Because the 6°×6° proxy DEM generates only ~1,700 Zarr chunks, I specifically capped the benchmark at 1,000 polygons. Querying larger batches (e.g., 100,000 polygons) on this localized dataset would mathematically guarantee that the same chunks are accessed repeatedly, transforming the test into an artificial "hot cache" in-memory benchmark. In a true 240 TB global deployment, querying thousands of disparate polygons globally would trigger constant cache misses, forcing continuous network I/O. While S3 performance was not empirically benchmarked, Zarr's architecture is positioned to mitigate this cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files, whereas Zarr uses a single JSON metadata file. Because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could execute concurrent HTTP Range requests for the exact chunks needed.
 
@@ -196,6 +170,37 @@ While smaller chunks significantly reduce the number of wasted bytes downloaded,
 Data engineers must tune the chunk size to find the exact sweet spot for their specific API payloads. Conversely, while Parquet's block sizes (Data Pages and Row Groups) can also be shrunk to reduce 1D overfetching, doing so breaks the contiguous lengths required for its columnar Run-Length Encoding (RLE) and dictionary compression, causing the file size to increase substantially. Zarr's 2D chunks avoid this tension, allowing for true geometric tuning.
 
 **General Heuristic:** For fetching disconnected data points (e.g., AI model data shuffling), Lance is optimal. For fetching clustered 2D shapes, Zarr is highly efficient.
+
+## Evaluating Performance Across Architectures
+
+With all the architectures defined, I can now compare their empirical performance constraints.
+
+**Performance:** The Rust binary reads the `.zarray` metadata directly, traces the pixel bounds for every polygon using the pure-Rust rasterizer, fetches the necessary bytes from the chunked Zarr array, and tallies the result natively. 
+
+![Polygon Extraction Latency](/plots/04_polygon_latency.png)
+*Figure 3: Median extraction latency for 1,000 polygons across evaluated architectures. (Note: Hatched bars indicate architectures that timed out and failed to complete within the strict 30-second synchronous API constraint).*
+
+This pipeline extracted 1,000 polygons in 0.24 seconds (see Figure 3). It is mathematically a linear $O(N)$ operation. However, because the geometric masking was shifted into native Rust structs operating in the CPU's L1 cache, the constant factor is sufficiently small that the scaling curve remains low relative to traditional methods.
+
+### Scaling Performance (Batch Extractions)
+
+With the data stored as compacted 1D integers in Parquet, I implemented a client-side region coverer. The system calculates the exact Hilbert cells intersecting the requested polygons and passes that list to Polars or DuckDB to execute a vectorized Hash Join. 
+
+By comparing this tabular approach against traditional geospatial masking and emerging formats, we can observe the fundamental scaling constraints of each architecture.
+
+![Polygon Scaling](/plots/05_scaling_polygons.png)
+*Figure 4: Scaling execution time as a function of polygon batch size. Database join logic scales sub-linearly, while traditional bounding box masks scale linearly.*
+
+As seen in the scaling chart (see Figure 4), the performance divergence is stark:
+
+1. **Traditional GIS (Rasterio + COG):** Scales strictly linearly ($O(N)$). Sequential bounding box masking struggles under the weight of large batches, requiring 0.73 seconds for 1,000 polygons.
+2. **Tabular Data (Polars/DuckDB + Parquet):** The database query step (the Hash Join) scales sub-linearly (empirically $O(N^{0.83})$). Polars processed the database query for 1,000 polygons in just 0.18 seconds. This is primarily because 466 million raw DEM pixels were compacted down to roughly 2.6 million parent cells, mathematically shrinking the problem space before the join operation.
+3. **AI Random Access (Lance):** Lance entirely bypasses the metadata startup penalty of Parquet. For small batches (10 polygons), its random-access design executes the query almost instantly. However, as the batch scales to 1,000 polygons, the overhead of assembling thousands of fragmented rows catches up, pulling its execution time to 0.25 seconds (slightly slower than Parquet).
+4. **Native Chunking (Pure Rust Zarr):** Bypassing both SQL overhead and Python iteration, the native Rust Zarr extraction dominates the pack. It maintains a functionally flat scaling curve due to minimal constant-time overhead, completing the entire extraction for 1,000 polygons in 0.24 seconds.
+
+**Why This Matters (The Extrapolation):** At a glance, a 0.49-second difference between Rasterio (0.73s) and Zarr (0.24s) for 1,000 polygons might seem too trivial to justify an entirely new Rust-based architecture. However, this local benchmark masks a systemic failure at scale. Because Rasterio scales linearly ($O(N)$), extracting 10,000 polygons will take ~7.3 seconds, and 100,000 polygons will take ~73 seconds—completely exceeding synchronous API constraints. Conversely, Zarr's sub-linear efficiency easily absorbs substantial batches. Furthermore, Rasterio achieved 0.73 seconds on a local NVMe drive. Over a cloud network (like AWS S3), fetching data introduces Time-To-First-Byte (TTFB) latency (often ~50ms per request). Standard GIS tools querying Cloud Optimised GeoTIFFs (COGs) must download complex TIFF headers to understand the file layout before fetching the actual tiles. When processing 1,000 polygons across multiple files, Rasterio often executes these network requests sequentially, paying the 50ms TTFB penalty thousands of times. This causes cloud extraction times to increase substantially into minutes.
+
+The pure-Rust Zarr architecture is effectively immune to these cloud I/O penalties. Zarr separates its metadata from its data. The Rust backend downloads a single, instantly readable JSON metadata file. It then uses simple mathematics to calculate exactly which byte-ranges are needed for all 1,000 polygons. Because it is written in asynchronous Rust, it fires all 1,000 HTTP Range requests *concurrently*. It pays the 50ms network latency penalty exactly once, completely hiding the cloud I/O bottleneck.
 
 ## Scaling Back to the Globe
 
