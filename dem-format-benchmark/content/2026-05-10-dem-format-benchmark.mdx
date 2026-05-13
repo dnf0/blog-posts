@@ -148,10 +148,10 @@ A common critique of Zarr is that it suffers from "overfetching" (Read Amplifica
 
 While this is true, it is a paradox that Parquet and Lance actually overfetch *more* data for 2D geometries. Columnar formats compress data into discrete blocks (e.g., 1MB Parquet Pages). To read a single row, the database must download and decompress the entire 1MB Page. Because a 2D polygon fragments into thousands of disconnected 1D Hilbert segments, those segments scatter across dozens of different compression pages on disk. 
 
-To empirically prove this, I tracked the exact disk I/O required to extract a single polygon requiring just **23 KB** of raw pixel data (see Figure 5):
+To empirically prove this, I tracked the exact disk I/O required to extract a single polygon requiring just **23 KB** of raw pixel data (see Figure 3):
 
 ![Overfetch Comparison](/plots/06_overfetch_comparison.png)
-*Figure 5: Log-scaled comparison of the uncompressed data fetched by Zarr (at various 2D chunk sizes) versus Parquet (1D Row Groups) to extract a 23 KB polygon.*
+*Figure 3: Log-scaled comparison of the uncompressed data fetched by Zarr (at various 2D chunk sizes) versus Parquet (1D Row Groups) to extract a 23 KB polygon.*
 
 *   **Zarr (512x512 chunks):** Touched 1 chunk, downloading **0.50 MB** of uncompressed data.
 *   **Parquet (Row Groups):** The 1D Hilbert line wandered so widely that the polygon's min/max bounds spanned 735 different Parquet Row Groups. DuckDB was forced to download and decompress **689 MB** of irrelevant data just to find the 23 KB it needed!
@@ -178,9 +178,9 @@ With all the architectures defined, I can now compare their empirical performanc
 **Performance:** The Rust binary reads the `.zarray` metadata directly, traces the pixel bounds for every polygon using the pure-Rust rasterizer, fetches the necessary bytes from the chunked Zarr array, and tallies the result natively. 
 
 ![Polygon Extraction Latency](/plots/04_polygon_latency.png)
-*Figure 3: Median extraction latency for 1,000 polygons across evaluated architectures. (Note: Hatched bars indicate architectures that timed out and failed to complete within the strict 30-second synchronous API constraint).*
+*Figure 4: Median extraction latency for 1,000 polygons across evaluated architectures. (Note: Hatched bars indicate architectures that timed out and failed to complete within the strict 30-second synchronous API constraint).*
 
-This pipeline extracted 1,000 polygons in 0.24 seconds (see Figure 3). It is mathematically a linear $O(N)$ operation. However, because the geometric masking was shifted into native Rust structs operating in the CPU's L1 cache, the constant factor is sufficiently small that the scaling curve remains low relative to traditional methods.
+This pipeline extracted 1,000 polygons in 0.24 seconds (see Figure 4). It is mathematically a linear $O(N)$ operation. However, because the geometric masking was shifted into native Rust structs operating in the CPU's L1 cache, the constant factor is sufficiently small that the scaling curve remains low relative to traditional methods.
 
 ### Scaling Performance (Batch Extractions)
 
@@ -189,9 +189,9 @@ With the data stored as compacted 1D integers in Parquet, I implemented a client
 By comparing this tabular approach against traditional geospatial masking and emerging formats, we can observe the fundamental scaling constraints of each architecture.
 
 ![Polygon Scaling](/plots/05_scaling_polygons.png)
-*Figure 4: Scaling execution time as a function of polygon batch size. Database join logic scales sub-linearly, while traditional bounding box masks scale linearly.*
+*Figure 5: Scaling execution time as a function of polygon batch size. Database join logic scales sub-linearly, while traditional bounding box masks scale linearly.*
 
-As seen in the scaling chart (see Figure 4), the performance divergence is stark:
+As seen in the scaling chart (see Figure 5), the performance divergence is stark:
 
 1. **Traditional GIS (Rasterio + COG):** Scales strictly linearly ($O(N)$). Sequential bounding box masking struggles under the weight of large batches, requiring 0.73 seconds for 1,000 polygons.
 2. **Tabular Data (Polars/DuckDB + Parquet):** The database query step (the Hash Join) scales sub-linearly (empirically $O(N^{0.83})$). Polars processed the database query for 1,000 polygons in just 0.18 seconds. This is primarily because 466 million raw DEM pixels were compacted down to roughly 2.6 million parent cells, mathematically shrinking the problem space before the join operation.
