@@ -13,7 +13,7 @@ description: "An empirical benchmark of architectural approaches for synchronous
 **TL;DR:** To build a high-concurrency API capable of synchronously querying 240 TB of multi-dimensional global hazard data, we must overcome the $O(N)$ bottlenecks of traditional raster masking. After benchmarking several architectures, we found that for batch extraction of 1K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
 </Callout>
 
-The production requirement is to build a high-concurrency web API serving global climate hazard data. The spatial resolution is 30m across all of Earth's landmass, equating to approximately 166 billion pixels per layer.
+The production requirement is to build a high-concurrency web API (Application Programming Interface) serving global climate hazard data. The spatial resolution is 30m across all of Earth's landmass, equating to approximately 166 billion pixels per layer.
 
 When accounting for the dimensionality of climate modeling—12 years, 4 emissions scenarios, 5 return periods, and 3 percentiles—the dataset expands to 720 distinct layers per spatial pixel. This results in a multi-dimensional data cube containing over 120 trillion data points and exceeding 240 Terabytes in uncompressed size.
 
@@ -32,11 +32,21 @@ To ensure reproducibility and transparency, it is critical to define the constra
 *   **Storage:** Local NVMe SSD.
 *   **Concurrency Model:** To ensure a fair architectural comparison, we explicitly bypassed the Python Global Interpreter Lock (GIL) wherever possible. For the Rasterio benchmark, we utilised Python's `ThreadPoolExecutor` because Rasterio's underlying C++ bindings release the GIL during masking operations, allowing it to utilize all 12 cores. The pure-Rust backend (`zarrs` and `geo-rasterize`) and the Hilbert coverer (`polars_hilbert`) explicitly utilised multi-threading via the `rayon` crate. DuckDB and Polars naturally utilised multi-threading for their tabular Hash Joins. Only the Python-native `xarray` operations remained bound by single-threaded execution loops. The fact that the 12-core pure-Rust Zarr implementation massively outperformed the 12-core Python/C++ Rasterio implementation highlights the severe overhead of Python object instantiation and serialization, even when the GIL is bypassed. 
 
+## Methodology: Evaluated Architectures
+To fully understand the results, it is essential to detail the different methods and tools evaluated in this benchmark. We tested six distinct architectural approaches to extract data for geometric polygons:
+
+1. **Rasterio (COG):** The industry-standard Python bindings for the C++ GDAL (Geospatial Data Abstraction Library) library. It queries Cloud Optimized GeoTIFFs (COGs) by individually masking the bounding box of each polygon. 
+2. **Xarray (Zarr):** A popular Python data science library used to lazily load and query N-dimensional Zarr arrays. 
+3. **DuckDB (Parquet & Lance):** An embedded analytical SQL database written in C++. It excels at executing vectorized "Hash Joins" over columnar data formats like Parquet and Lance.
+4. **Polars (Parquet):** A lightning-fast DataFrame library written in Rust, utilized here to perform the exact same Hash Joins as DuckDB, serving as a secondary validation of the columnar tabular approach.
+5. **Pure Rust Zarr (`zarrs`):** A custom backend we built natively in Rust. It bypasses Python and C++ entirely, directly fetching byte-ranges from Zarr chunks using the `zarrs` crate and geometrically masking them using the `geo-rasterize` crate.
+6. **Lance Scanner:** The native Rust query engine built for the Lance data format, optimized for rapid random access of data blobs for artificial intelligence (AI) models.
+
 ## Exploring the Ecosystem
 
 The standard approach to managing spatial raster data involves N-dimensional arrays, predominantly Cloud Optimised GeoTIFFs (COG) [2] or cloud-native Zarr stores [3]. 
 
-In these formats, data is chunked into 2D or 3D grids (e.g., 512x512 pixels) and compressed using algorithms like ZSTD or DEFLATE. They are highly efficient at storage because the X and Y coordinates are implied by the pixel's position in the grid array. The highly quantized DEM proxy compressed to 2.4 MB in COG and 1.7 MB in Zarr.
+In these formats, data is chunked into 2D or 3D grids (e.g., 512x512 pixels) and compressed using algorithms like Zstandard (ZSTD) or DEFLATE. They are highly efficient at storage because the X and Y coordinates are implied by the pixel's position in the grid array. The highly quantized DEM proxy compressed to 2.4 MB in COG and 1.7 MB in Zarr.
 
 However, their query engines are generally not optimised for large-batch polygon extractions. When querying 1,000 irregular polygons using standard ecosystem tools (such as `rasterio.mask` for COGs or `rioxarray.clip` for Zarr), the system performs sequential raster masking. 
 
@@ -61,7 +71,7 @@ This linear scaling is insufficient for synchronous Web API constraints, necessi
 
 An alternative approach is treating spatial data as tabular data (see Figure 2). By flattening the data into a columnar format like Parquet [4], we can utilize relational database engines like DuckDB [5] or Polars [6].
 
-A known limitation of this approach is the "Coordinate Tax". Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or WKB geometries) for every pixel. This introduces significant storage overhead. An uncompacted, flat Parquet file with raw explicit X/Y coordinates for the 6°×6° proxy DEM required over 1.1 GB.
+A known limitation of this approach is the "Coordinate Tax". Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or Well-Known Binary (WKB) geometries) for every pixel. This introduces significant storage overhead. An uncompacted, flat Parquet file with raw explicit X/Y coordinates for the 6°×6° proxy DEM required over 1.1 GB.
 
 To eliminate this overhead, we utilised a Native 2D Hilbert Curve [7]. By mapping the global 1-arc-second grid `(col, row)` to a 1D Hilbert integer using bitwise XOR rotations, the index replaces the explicit location coordinates.
 
@@ -98,7 +108,7 @@ If a polygon covers both regions, the database returns two rows. The single pixe
 
 **Structuring Parquet for Analytics:** The optimal Parquet structure depends on the SQL aggregation used:
 1. **For `MAX()` and `MIN()`:** Quadtree Compaction is mathematically sound. Since a cell is only compacted if all child pixels share the exact same value, intersection guarantees the correct value. The 2.8 MB compacted file is highly efficient for extreme-value queries.
-2. **For `AVG()` and `SUM()`:** The `pixel_count` workaround fails on boundary cells, making Uncompacted Parquet the mathematically correct option. Skipping the Quadtree Compaction step ensures every pixel retains its own row. Thanks to Parquet's native ZSTD/RLE compression, an uncompacted `q2500` Hilbert file still compressed to 319 MB, retaining pixel-level analytical accuracy while supporting efficient Hash Joins.
+2. **For `AVG()` and `SUM()`:** The `pixel_count` workaround fails on boundary cells, making Uncompacted Parquet the mathematically correct option. Skipping the Quadtree Compaction step ensures every pixel retains its own row. Thanks to Parquet's native ZSTD/RLE (Run-Length Encoding) compression, an uncompacted `q2500` Hilbert file still compressed to 319 MB, retaining pixel-level analytical accuracy while supporting efficient Hash Joins.
 
 ## Native Zarr Integration in Rust
 
