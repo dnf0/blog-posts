@@ -76,29 +76,50 @@ def figure_storage_size() -> None:
     print(f"Saved {out}")
 
 def bar_chart_by_query_type(df: pd.DataFrame, query_type: str, filename: str) -> None:
-    subset = df[(df["query_type"] == query_type) & (df["status"] == "success")]
+    subset = df[(df["query_type"] == query_type)].copy()
     if subset.empty:
         return
 
+    # Treat timeouts as 30,000ms for visualization
+    subset.loc[subset["status"] == "timeout", "duration_ms"] = 30000.0
+
+    # We only want to plot successes and timeouts
+    subset = subset[subset["status"].isin(["success", "timeout"])]
+    if subset.empty:
+        return
+
+    # Group and aggregate
     agg = subset.groupby(["format_label", "tool_label", "data_variant"]).agg(
         median_duration_ms=("duration_ms", "median"),
-        median_final_rss_mb=("final_rss_mb", "median"),
+        # If any run was a timeout in the group, we can mark the group as a timeout
+        is_timeout=("status", lambda x: "timeout" if "timeout" in x.values else "success")
     ).reset_index()
 
     agg["combo"] = agg["format_label"] + " + " + agg["tool_label"]
     agg = agg.sort_values(by="median_duration_ms")
+    
+    # Create pattern shape column
+    agg["pattern"] = agg["is_timeout"].apply(lambda x: "/" if x == "timeout" else "")
 
     fig = px.bar(
         agg,
         x="combo",
         y="median_duration_ms",
         color="data_variant",
+        pattern_shape="pattern",
         barmode="group",
         title=f"{QUERY_LABELS.get(query_type, query_type)} Queries: Median Duration (Log Scale)",
-        labels={"median_duration_ms": "Median Duration (ms)", "combo": "Format + Tool"},
+        labels={"median_duration_ms": "Median Duration (ms)", "combo": "Format + Tool", "pattern": "Status"},
         log_y=True,
     )
-    fig.update_layout(template="plotly_white", height=600, width=1100, xaxis_tickangle=-45)
+    
+    # Update legend to make it cleaner
+    fig.update_layout(
+        template="plotly_white", 
+        height=600, 
+        width=1100, 
+        xaxis_tickangle=-45,
+    )
     
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     out = PLOTS_DIR / filename
