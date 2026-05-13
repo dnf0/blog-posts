@@ -55,28 +55,6 @@ A known limitation of this approach is the "Coordinate Tax". Traditional Parquet
 
 To eliminate this overhead, we utilized a Native 2D Hilbert Curve [7]. By mapping the global 1-arc-second grid `(col, row)` to a 1D Hilbert integer using bitwise XOR rotations, the index replaces the explicit location coordinates.
 
-```rust
-// Core bitwise logic mapping 2D (x, y) to a 1D Hilbert distance (d)
-#[inline(always)]
-fn hilbert_encode(mut x: u32, mut y: u32) -> u64 {
-    let mut d: u64 = 0;
-    for i in (0..32).rev() {
-        let rx = (x >> i) & 1;
-        let ry = (y >> i) & 1;
-        let quad = (3 * rx) ^ ry;
-        d += (quad as u64) << (2 * i);
-        if ry == 0 {
-            if rx == 1 {
-                x = x ^ ((1 << i) - 1);
-                y = y ^ ((1 << i) - 1);
-            }
-            std::mem::swap(&mut x, &mut y);
-        }
-    }
-    d
-}
-```
-
 ### Quadtree Compaction
 
 Because the hazard data proxy contains contiguous uniform regions, compression can be improved through Quadtree Compaction. 
@@ -89,11 +67,7 @@ Applying this to the Hilbert Parquet file reduced the file size from 1.7 GB to 2
 
 ### Evaluating Vectorized Hash Joins
 
-With the data stored as compacted 1D integers in Parquet, we implemented a client-side region coverer. The system calculates the exact Hilbert cells intersecting the requested polygons and passes that list to Polars or DuckDB to execute a vectorized Hash Join:
-
-```sql
-SELECT band_value FROM read_parquet('dem.parquet') WHERE hilbert_index IN (...)
-```
+With the data stored as compacted 1D integers in Parquet, we implemented a client-side region coverer. The system calculates the exact Hilbert cells intersecting the requested polygons and passes that list to Polars or DuckDB to execute a vectorized Hash Join.
 
 ![Polygon Scaling](/plots/05_scaling_polygons.png)
 *Figure 3: Scaling execution time as a function of polygon batch size. Database join logic scales sub-linearly, while traditional bounding box masks scale linearly.*
