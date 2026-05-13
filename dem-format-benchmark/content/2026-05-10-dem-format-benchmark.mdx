@@ -73,7 +73,7 @@ Unlike COG and Zarr (which compress fixed blocks using DEFLATE/ZSTD), Quadtree C
 
 This process recursively ascends 16 levels of the quadtree. For uniform areas, millions of pixels collapse into larger parent cells, functioning as a 2D Run-Length Encoder. 
 
-Applying this to the Hilbert Parquet file reduced the file size from 1.7 GB to 2.8 MB. (Note that this is slightly larger than COG at 2.37 MB and Zarr at 1.65 MB, because Parquet must still explicitly store the 1D Hilbert index column for every cell, whereas N-dimensional arrays imply locations entirely by position).
+Applying this to the Hilbert Parquet file reduced the file size from 1.7 GB to 2.8 MB. (Note that this is slightly larger than COG at 2.4 MB and Zarr at 1.7 MB, because Parquet must still explicitly store the 1D Hilbert index column for every cell, whereas N-dimensional arrays imply locations entirely by position).
 
 ### Evaluating Vectorized Hash Joins
 
@@ -132,7 +132,7 @@ The distinction between Lance and Zarr for polygon queries relies on the differe
 
 When querying a polygon, the requirement is a clustered geographic neighborhood. Zarr is optimized for this via 2D spatial tiles (e.g., 512x512 pixels). The Rust backend fetches the required 2D tile via a single HTTP Range request. Once decompressed in memory, all necessary pixels are spatially contiguous.
 
-Lance and Parquet are 1D columnar formats. Querying a polygon requires translating the 2D shape into thousands of 1D Hilbert integers. Because the irregular polygon boundary cuts across the Hilbert curve, these integers are fragmented, requiring Lance to execute thousands of non-contiguous row fetches. The overhead of assembling these fragmented rows limits its performance for massive batch polygon extractions (~0.46 seconds for 1K polygons, compared to Zarr's 0.24 seconds).
+Lance and Parquet are 1D columnar formats. Querying a polygon requires translating the 2D shape into thousands of 1D Hilbert integers. Because the irregular polygon boundary cuts across the Hilbert curve, these integers are fragmented, requiring Lance to execute thousands of non-contiguous row fetches. The overhead of assembling these fragmented rows limits its performance for massive batch polygon extractions (~0.46 seconds for 1K polygons, compared to Zarr's 0.24 seconds). Furthermore, because Lance prioritizes raw memory layouts to guarantee microsecond seek times rather than utilizing aggressive Dictionary and Run-Length Encodings like Parquet, its storage footprint for dense scalar grids is significantly larger (the uncompacted X/Y test dataset bloated to 4.7 GB in Lance compared to 528 MB in Parquet).
 
 #### The Read Amplification Paradox (Overfetching)
 A common critique of Zarr is that it suffers from "overfetching" (Read Amplification). If a polygon only touches 10 pixels within a 512x512 chunk, Zarr still must download and decompress the entire 262,144-pixel chunk. 
