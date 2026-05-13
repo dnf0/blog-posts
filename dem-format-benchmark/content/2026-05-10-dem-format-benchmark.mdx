@@ -30,7 +30,7 @@ This provides a reasonable approximation of the categorical nature of global haz
 
 The standard approach to managing spatial raster data involves N-dimensional arrays, predominantly Cloud Optimized GeoTIFFs (COG) [2] or cloud-native Zarr stores [3]. 
 
-In these formats, data is chunked into 2D or 3D grids (e.g., 512x512 pixels) and compressed using algorithms like ZSTD or DEFLATE. They are highly efficient at storage because the X and Y coordinates are implied by the pixel's position in the grid array. The quantized DEM proxy compressed to 9.7 MB in COG and 9.8 MB in Zarr.
+In these formats, data is chunked into 2D or 3D grids (e.g., 512x512 pixels) and compressed using algorithms like ZSTD or DEFLATE. They are highly efficient at storage because the X and Y coordinates are implied by the pixel's position in the grid array. The highly quantized DEM proxy compressed to 2.4 MB in COG and 1.7 MB in Zarr.
 
 However, their query engines are generally not optimized for large-batch polygon extractions. When querying 1,000 irregular polygons using standard ecosystem tools (such as `rasterio.mask` for COGs or `rioxarray.clip` for Zarr), the system performs sequential raster masking. 
 
@@ -44,7 +44,7 @@ This constitutes an $O(N)$ sequential operation over geometries.
 
 Extracting 1,000 polygons via Rasterio took 0.73 seconds. This benchmark represents a best-case scenario: it assumes the entire DEM is stored in a single, locally mounted TIFF file. In production, global raster datasets are stored as numerous partitioned map tiles in cloud object storage (e.g., AWS S3). Querying 1,000 global polygons against tiled COGs would require substantial network I/O, downloading numerous remote HTTP headers, and dynamically stitching tiles in memory, leading to significantly higher latency. 
 
-The standard Zarr Python ecosystem (`xarray` and `rioxarray`) encountered limitations at scale, failing at 110 seconds for 100 polygons due to the overhead of instantiating Python objects for each individual polygon extraction.
+The standard Zarr Python ecosystem (`xarray` and `rioxarray`) encountered severe performance limitations, requiring over 13 seconds to process 1,000 polygons due to the overhead of instantiating Python objects and building dependency graphs for each individual extraction.
 
 This linear scaling is insufficient for synchronous Web API constraints, necessitating an alternative paradigm.
 
@@ -78,7 +78,7 @@ With the data stored as compacted 1D integers in Parquet, we implemented a clien
 
 As seen in the scaling chart (see Figure 3), the database query step (the Hash Join) scales sub-linearly (empirically $O(N^{0.83})$). Polars processed the database query for 1,000 polygons in 0.18 seconds. 
 
-This is primarily because 118 million raw DEM pixels were compacted to 500,000 parent cells, mathematically shrinking the problem space before the join operation.
+This is primarily because 466 million raw DEM pixels were compacted down to roughly 2.6 million parent cells, mathematically shrinking the problem space before the join operation.
 
 ## The Area-Weighting Trade-off
 
@@ -114,7 +114,7 @@ This pipeline extracted 1,000 polygons in 0.24 seconds (see Figure 4). It is mat
 Because it operates natively on the raw pixels rather than compacted cells, this approach is immune to the Parquet area-weighting flaw, yielding correct `AVG()` aggregations natively.
 
 ### Comparing Zarr and Parquet Compression
-Zarr's file size (9.8 MB) is larger than the compacted Parquet file (2.8 MB) due to the difference between chunked arrays and quadtrees. Zarr requires a dense, regular grid; it stores all 466 million pixels and relies on algorithms like ZSTD or DEFLATE to compress them. Parquet achieved 2.8 MB because Quadtree Compaction explicitly removed millions of identical rows. 
+Zarr's file size (1.7 MB) is actually smaller than the compacted Parquet file (2.8 MB). This is because Zarr requires a dense, regular grid; it stores all 466 million pixels and relies on algorithms like ZSTD or DEFLATE to compress them, which is incredibly efficient when locations are implied by position. Parquet requires 2.8 MB because, even though Quadtree Compaction explicitly removed millions of identical rows, it still must explicitly store the 1D Hilbert index column for every remaining parent cell. 
 
 Furthermore, Zarr's default compression traverses chunks in standard row-major (C-contiguous) order, which breaks spatial locality at the end of every line and reduces ZSTD efficiency. Reordering the 2D chunk bytes along a Hilbert curve via a custom `numcodecs` filter prior to compression would maximize the run-length of identical values, potentially improving Zarr's compression ratio to match Parquet without altering the dense array structure.
 
@@ -179,9 +179,6 @@ When the Rust backend queries the globe, it:
 
 This approach preserves the read performance of small chunks while drastically reducing the total number of files in the storage bucket. Furthermore, because global hazard data typically follows a "Write Once, Read Many" (WORM) lifecycle, the shard index never changes. The Rust backend can aggressively cache these indices in RAM. This entirely neutralizes the "double-fetch" penalty of Sharding, allowing all subsequent API queries to instantly locate the inner chunk and fetch the required data with a single HTTP Range request.
 
-### Transactional Data Cubes: Icechunk
-Managing updates on a 240 TB global Zarr cube is an administrative challenge. Icechunk [13] is a transactional storage engine built natively for Zarr that introduces version control to data cubes. It allows teams to create zero-copy branches of large arrays, write updates, and merge them with full ACID compliance.
-
 ## Conclusion
 For large-scale, multi-dimensional spatial analytics, traditional GIS raster pipelines face constraints due to sequential $O(N)$ geometry masking. Tabular Parquet hash joins offer a sub-linear alternative for 1D datasets, but present challenges when calculating exact area-weighted averages or scaling to highly dimensional schemas. 
 
@@ -211,4 +208,3 @@ uv run python scripts/visualize.py
 - [10] rayon Rust Crate: https://crates.io/crates/rayon
 - [11] Zarr V3 Sharding Specification: https://zarr.dev/zeps/draft/ZEP0002.html
 - [12] Lance Format: https://lancedb.github.io/lance/
-- [13] Icechunk: https://icechunk.io/
