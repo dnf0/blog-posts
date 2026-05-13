@@ -26,6 +26,24 @@ To empirically test and benchmark architectures capable of meeting these strict 
 
 We evaluate multiple quantizations to artificially control the spatial contiguity of the data. A fine `q100` quantization produces highly volatile, fragmented regions, while a coarse `q2500` quantization produces massive, smooth, uniform blocks. This allows us to rigorously benchmark how different compression algorithms (like Quadtree Compaction and Run-Length Encoding) scale when encountering varying levels of physical spatial contiguity.
 
+## Table of Contents
+- [Benchmark Environment & Hardware Constraints](#benchmark-environment--hardware-constraints)
+- [Methodology: Evaluated Architectures](#methodology-evaluated-architectures)
+- [Exploring the Ecosystem](#exploring-the-ecosystem)
+- [Tabular Joins and the Coordinate Tax](#tabular-joins-and-the-coordinate-tax)
+  - [Quadtree Compaction](#quadtree-compaction)
+  - [Evaluating Vectorized Hash Joins](#evaluating-vectorized-hash-joins)
+- [The Area-Weighting Trade-off](#the-area-weighting-trade-off)
+- [Native Zarr Integration in Rust](#native-zarr-integration-in-rust)
+  - [Comparing Zarr and Parquet Compression](#comparing-zarr-and-parquet-compression)
+- [Spatial Chunking vs. Row-Level Random Access](#spatial-chunking-vs-row-level-random-access)
+  - [The Read Amplification Paradox (Overfetching)](#the-read-amplification-paradox-overfetching)
+- [Scaling Back to the Globe](#scaling-back-to-the-globe)
+  - [Overcoming Cloud Storage Limits: Zarr v3 Sharding](#overcoming-cloud-storage-limits-zarr-v3-sharding)
+- [Conclusion](#conclusion)
+- [Reproduce This](#reproduce-this)
+- [References](#references)
+
 ## Benchmark Environment & Hardware Constraints
 To ensure reproducibility and transparency, it is critical to define the constraints of the benchmark environment:
 *   **Hardware:** Apple MacBook M4, 12 cores, 24 GB RAM.
