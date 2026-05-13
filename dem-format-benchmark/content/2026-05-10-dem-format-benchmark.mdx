@@ -214,9 +214,14 @@ When the Rust backend queries the globe, it:
 This approach preserves the read performance of small chunks while drastically reducing the total number of files in the storage bucket. Furthermore, because global hazard data typically follows a "Write Once, Read Many" (WORM) lifecycle, the shard index never changes. The Rust backend can aggressively cache these indices in RAM. This entirely neutralizes the "double-fetch" penalty of Sharding, allowing all subsequent API queries to instantly locate the inner chunk and fetch the required data with a single HTTP Range request.
 
 ## Conclusion
-For large-scale, multi-dimensional spatial analytics, traditional GIS raster pipelines face constraints due to sequential $O(N)$ geometry masking. Tabular Parquet hash joins offer a sub-linear alternative for 1D datasets, but present challenges when calculating exact area-weighted averages or scaling to highly dimensional schemas. 
 
-For a high-concurrency, global hazard API, a pure-Rust backend querying sharded N-dimensional Zarr v3 arrays provides a robust balance of storage compression, analytical accuracy, and synchronous API performance.
+Building a synchronous, high-concurrency API over petabytes of spatial data requires pushing modern data engineering to its absolute limits. As we have demonstrated, relying on industry-standard GIS raster pipelines (like Rasterio and COG) introduces sequential $O(N)$ geometry masking bottlenecks that fail under the weight of massive polygon batches. 
+
+Flattening spatial arrays into 1D columnar formats like Parquet and executing vectorized Hash Joins offers a tantalizing sub-linear alternative. However, this approach forces engineers into difficult compromises. To achieve extreme compression, one must use Quadtree Compaction, which destroys the area-weighting accuracy required for rigorous `AVG()` analytics. Furthermore, mapping 2D geometries onto 1D space-filling curves triggers the "Zone Map Trap," causing catastrophic Read Amplification as the database overfetches hundreds of megabytes of fragmented row groups. Fixing this requires paying the "Coordinate Tax"—bloating the file size with explicit X/Y columns to enable 2D Zone Map pruning.
+
+Ultimately, the most elegant architecture respects the physical reality of the data. For large-scale, multi-dimensional spatial analytics, a pure-Rust backend querying sharded N-dimensional Zarr v3 arrays provides the optimal, uncompromising solution. 
+
+By aggressively tuning the spatial chunk size to match the API's expected payload, utilizing Zarr v3 Sharding to bypass cloud object storage limits, and caching the WORM index in memory to neutralize read latency, data engineers can achieve a robust balance of storage compression, mathematical accuracy, and microsecond API performance.
 
 ## Reproduce This
 
