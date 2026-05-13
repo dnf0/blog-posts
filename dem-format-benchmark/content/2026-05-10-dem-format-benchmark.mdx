@@ -140,41 +140,10 @@ Zarr's file size (9.8 MB) is larger than the compacted Parquet file (2.8 MB) due
 
 Furthermore, Zarr's default compression traverses chunks in standard row-major (C-contiguous) order, which breaks spatial locality at the end of every line and reduces ZSTD efficiency. Reordering the 2D chunk bytes along a Hilbert curve via a custom `numcodecs` filter prior to compression would maximize the run-length of identical values, potentially improving Zarr's compression ratio to match Parquet without altering the dense array structure.
 
-## Scaling Back to the Globe
+## Spatial Chunking vs. Row-Level Random Access
 
-Returning to the original 240 TB multi-dimensional problem (720 distinct hazard layers per 30m spatial pixel), the architectural path requires evaluating the limits of modern data structures. 
+While Zarr v3 and Parquet are established formats, emerging technologies like Lance [12] are actively addressing spatial data limitations. Lance is a modern columnar format written in Rust specifically designed for machine learning and multimodal data. It natively integrates with GeoArrow. Lance is optimized for huge-scale data storage and rapid random access. In recent benchmarks, Lance demonstrated significantly faster random access times than Parquet for fetching specific blobs of data (like imagery chunks). If a spatial API requires feeding randomly shuffled data into an AI model for inference, Lance provides an optimized solution.
 
-Scaling the Hilbert Parquet architecture globally introduces a hyper-dimensionality challenge. Parquet schemas are designed for narrow tables. Storing 720 layers per pixel requires either an exceptionally wide table (destroying columnar scan efficiency) or a deeply nested array structure (forcing the database to deserialize large blobs of data to read a single variable). 
-
-Conversely, Zarr natively handles N-dimensional chunking (e.g., `[layer, y, x]`). If an API request specifies a specific layer, the Rust backend calculates the 1D index for that slice and reads only the corresponding bytes, leaving the other layers untouched.
-
-### Overcoming Cloud Storage Limits: Zarr v3 Sharding
-A final consideration for deploying a global Zarr cube is the nature of cloud object storage. 
-
-Zarr v2 stores every chunk as an individual file. A global 30m dataset with 720 layers chunked into 512x512 grids would generate billions of files. In a key-value object store like S3, this volume of files exhausts inode limits on caching layers, slows data transfer, and increases costs associated with HTTP `PUT` and `LIST` requests. 
-
-The standard solution is Zarr v3 Sharding [11]. Sharding introduces a two-tier hierarchy by grouping thousands of chunks into larger "Shard" files (e.g., 500 MB). A byte-offset index is appended to the end of each shard. 
-
-When the Rust backend queries the globe, it:
-1. Reads the master metadata to locate the relevant Shard file.
-2. Fetches the trailing byte-offset index via an HTTP Range request.
-3. Parses the index to locate the byte-offset of the specific 512x512 inner chunk.
-4. Executes a second HTTP Range request to fetch the required bytes.
-
-This approach preserves the read performance of small chunks while drastically reducing the total number of files in the storage bucket. Furthermore, because global hazard data typically follows a "Write Once, Read Many" (WORM) lifecycle, the shard index never changes. The Rust backend can aggressively cache these indices in RAM. This entirely neutralizes the "double-fetch" penalty of Sharding, allowing all subsequent API queries to instantly locate the inner chunk and fetch the required data with a single HTTP Range request.
-
-### Conclusion
-For large-scale, multi-dimensional spatial analytics, traditional GIS raster pipelines face constraints due to sequential $O(N)$ geometry masking. Tabular Parquet hash joins offer a sub-linear alternative for 1D datasets, but present challenges when calculating exact area-weighted averages or scaling to highly dimensional schemas. 
-
-For a high-concurrency, global hazard API, a pure-Rust backend querying sharded N-dimensional Zarr v3 arrays provides a robust balance of storage compression, analytical accuracy, and synchronous API performance.
-
-## Future Outlook: Lance and Icechunk
-
-While Zarr v3 and Parquet are established formats, emerging technologies are actively addressing spatial data limitations:
-
-1. **Lance Format:** Lance [12] is a modern columnar format written in Rust specifically designed for machine learning and multimodal data. It natively integrates with GeoArrow. Lance is optimized for huge-scale data storage and rapid random access. In recent benchmarks, Lance demonstrated significantly faster random access times than Parquet for fetching specific blobs of data (like imagery chunks). If a spatial API requires feeding randomly shuffled data into an AI model for inference, Lance provides an optimized solution.
-
-### Spatial Chunking vs. Row-Level Random Access
 The distinction between Lance and Zarr for polygon queries relies on the difference between Spatial Locality and Row-Level Retrieval.
 
 When querying a polygon, the requirement is a clustered geographic neighborhood. Zarr is optimized for this via 2D spatial tiles (e.g., 512x512 pixels). The Rust backend fetches the required 2D tile via a single HTTP Range request. Once decompressed in memory, all necessary pixels are spatially contiguous.
@@ -209,7 +178,36 @@ Data engineers must tune the chunk size to find the exact sweet spot for their s
 
 **General Heuristic:** For fetching disconnected data points (e.g., AI model data shuffling), Lance is optimal. For fetching clustered 2D shapes, Zarr is highly efficient.
 
-2. **Icechunk:** Managing updates on a 240 TB global Zarr cube is an administrative challenge. Icechunk [13] is a transactional storage engine built natively for Zarr that introduces version control to data cubes. It allows teams to create zero-copy branches of large arrays, write updates, and merge them with full ACID compliance.
+## Scaling Back to the Globe
+
+Returning to the original 240 TB multi-dimensional problem (720 distinct hazard layers per 30m spatial pixel), the architectural path requires evaluating the limits of modern data structures. 
+
+Scaling the Hilbert Parquet architecture globally introduces a hyper-dimensionality challenge. Parquet schemas are designed for narrow tables. Storing 720 layers per pixel requires either an exceptionally wide table (destroying columnar scan efficiency) or a deeply nested array structure (forcing the database to deserialize large blobs of data to read a single variable). 
+
+Conversely, Zarr natively handles N-dimensional chunking (e.g., `[layer, y, x]`). If an API request specifies a specific layer, the Rust backend calculates the 1D index for that slice and reads only the corresponding bytes, leaving the other layers untouched.
+
+### Overcoming Cloud Storage Limits: Zarr v3 Sharding
+A final consideration for deploying a global Zarr cube is the nature of cloud object storage. 
+
+Zarr v2 stores every chunk as an individual file. A global 30m dataset with 720 layers chunked into 512x512 grids would generate billions of files. In a key-value object store like S3, this volume of files exhausts inode limits on caching layers, slows data transfer, and increases costs associated with HTTP `PUT` and `LIST` requests. 
+
+The standard solution is Zarr v3 Sharding [11]. Sharding introduces a two-tier hierarchy by grouping thousands of chunks into larger "Shard" files (e.g., 500 MB). A byte-offset index is appended to the end of each shard. 
+
+When the Rust backend queries the globe, it:
+1. Reads the master metadata to locate the relevant Shard file.
+2. Fetches the trailing byte-offset index via an HTTP Range request.
+3. Parses the index to locate the byte-offset of the specific 512x512 inner chunk.
+4. Executes a second HTTP Range request to fetch the required bytes.
+
+This approach preserves the read performance of small chunks while drastically reducing the total number of files in the storage bucket. Furthermore, because global hazard data typically follows a "Write Once, Read Many" (WORM) lifecycle, the shard index never changes. The Rust backend can aggressively cache these indices in RAM. This entirely neutralizes the "double-fetch" penalty of Sharding, allowing all subsequent API queries to instantly locate the inner chunk and fetch the required data with a single HTTP Range request.
+
+### Transactional Data Cubes: Icechunk
+Managing updates on a 240 TB global Zarr cube is an administrative challenge. Icechunk [13] is a transactional storage engine built natively for Zarr that introduces version control to data cubes. It allows teams to create zero-copy branches of large arrays, write updates, and merge them with full ACID compliance.
+
+## Conclusion
+For large-scale, multi-dimensional spatial analytics, traditional GIS raster pipelines face constraints due to sequential $O(N)$ geometry masking. Tabular Parquet hash joins offer a sub-linear alternative for 1D datasets, but present challenges when calculating exact area-weighted averages or scaling to highly dimensional schemas. 
+
+For a high-concurrency, global hazard API, a pure-Rust backend querying sharded N-dimensional Zarr v3 arrays provides a robust balance of storage compression, analytical accuracy, and synchronous API performance.
 
 ## Reproduce This
 
