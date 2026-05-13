@@ -1,16 +1,16 @@
 ---
 title: "Effective Querying of Global Multi-Dimensional Data Sets"
 date: "2026-05-10"
-tags: [geospatial, python, rust, zarr, polars, benchmarking]
+tags: [geospatial, python, rust, zarr, polars, benchmarking, data-engineering]
 description: "An empirical benchmark of architectural approaches for synchronously querying large batches of polygons against global, multi-dimensional hazard datasets."
 ---
 
 # Effective Querying of Global Multi-Dimensional Data Sets
 
-*May 10, 2026 • Tags: `geospatial`, `python`, `rust`, `zarr`, `polars`, `benchmarking`*
+*May 10, 2026 • Tags: `geospatial`, `python`, `rust`, `zarr`, `polars`, `benchmarking`, `data-engineering`*
 
 <Callout type="info">
-**TL;DR:** For batch extraction of 1K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
+**TL;DR:** To build a high-concurrency API capable of synchronously querying 240 TB of multi-dimensional global hazard data, we must overcome the $O(N)$ bottlenecks of traditional raster masking. After benchmarking several architectures, we found that for batch extraction of 1K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
 </Callout>
 
 The production requirement is to build a high-concurrency web API serving global climate hazard data. The spatial resolution is 30m across all of Earth's landmass, equating to approximately 166 billion pixels per layer.
