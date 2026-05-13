@@ -198,6 +198,18 @@ The ultimate architecture for a high-concurrency, global hazard API is a **pure-
 While Zarr v3 and Parquet dominate the current landscape, two bleeding-edge technologies are rapidly emerging as the next frontier for global spatial data:
 
 1. **Lance Format (The AI-First Format):** Parquet was designed for traditional data warehousing. **Lance** is a modern columnar format written in Rust specifically designed for machine learning and multimodal data. It natively integrates with GeoArrow (understanding points and polygons in memory). Crucially, Lance is optimized for **huge-scale data storage and rapid random access**. In recent benchmarks, Lance demonstrated up to 2,000x faster random access times than Parquet for fetching specific blobs of data (like imagery chunks). If your spatial API evolves into feeding randomly shuffled data into an AI model for real-time inference, Lance is the state-of-the-art solution.
+
+### Spatial Chunking vs. Row-Level Random Access
+If Lance is so incredibly fast at random access, why didn't we use it to replace Zarr for querying polygons? After all, querying 100,000 random polygons scattered across the globe *is* a form of random access.
+
+The answer lies in the fundamental difference between **Spatial Locality** and **Row-Level Retrieval**.
+
+When a user draws a polygon, they aren't asking for 10,000 disconnected, random pixels; they are asking for a clustered geographic neighborhood. Zarr is perfectly optimized for this. Its data is chunked into 2D spatial tiles (e.g., 512x512 pixels). When our Rust backend "jumps" to a polygon, it makes exactly *one* HTTP Range request to fetch that 2D tile. Once decompressed in memory, 100% of the pixels needed for that polygon are sitting directly adjacent to each other in the CPU cache.
+
+Lance, on the other hand, is a 1D columnar format. To query a polygon, we must translate that 2D shape into thousands of 1D Hilbert integers. Because the irregular polygon boundary cuts across the Hilbert curve, those integers are fragmented. Lance must execute thousands of tiny, non-contiguous row fetches. Even though Lance is the fastest database in the world at finding a single row, the overhead of assembling thousands of fragmented rows causes it to choke under the weight of massive batch polygon extractions (~65 seconds for 100K polygons, compared to Zarr's 1.5 seconds).
+
+**The Rule of Thumb:** If you are asking a database for 10,000 disconnected data points (like an AI model shuffling training data), **Lance wins**. If you are asking a database for 10,000 clustered 2D shapes, **Zarr wins**.
+
 2. **Icechunk (Version Control for Zarr):** A massive challenge with a 240 TB global Zarr cube is managing updates. If a data scientist improves the flood model for a specific county, overwriting production data is terrifying. **Icechunk** is a new transactional storage engine built natively for Zarr that brings "Git-like" version control to data cubes. It allows teams to create zero-copy branches of petabyte-scale arrays, write updates, and merge them with full ACID compliance.
 
 ## Reproduce This
