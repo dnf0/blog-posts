@@ -155,7 +155,7 @@ When the Rust backend queries the globe, it:
 3. Parses the index to locate the byte-offset of the specific 512x512 inner chunk.
 4. Executes a second HTTP Range request to fetch the required bytes.
 
-This approach preserves the read performance of small chunks while drastically reducing the total number of files in the storage bucket.
+This approach preserves the read performance of small chunks while drastically reducing the total number of files in the storage bucket. Furthermore, because global hazard data typically follows a "Write Once, Read Many" (WORM) lifecycle, the shard index never changes. The Rust backend can aggressively cache these indices in RAM. This entirely neutralizes the "double-fetch" penalty of Sharding, allowing all subsequent API queries to instantly locate the inner chunk and fetch the required data with a single HTTP Range request.
 
 ### Conclusion
 For large-scale, multi-dimensional spatial analytics, traditional GIS raster pipelines face constraints due to sequential $O(N)$ geometry masking. Tabular Parquet hash joins offer a sub-linear alternative for 1D datasets, but present challenges when calculating exact area-weighted averages or scaling to highly dimensional schemas. 
