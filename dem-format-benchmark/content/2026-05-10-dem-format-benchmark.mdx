@@ -16,7 +16,7 @@ A primary constraint of this system is that the API must execute synchronous, lo
 To empirically test architectures for this challenge, we use a 6°×6° Copernicus Digital Elevation Model (DEM) [1] covering the Swiss Alps (1.7GB, ~466M pixels). By applying a `q2500` quantization (rounding elevations into 2,500m buckets), we artificially transform the varying mountain terrain into uniform blocks (see Figure 1). 
 
 ![Quantization Comparison](/plots/00_quantization_visual.png)
-*Figure 1: Visual comparison of raw elevation data vs. `q2500` quantized terrain, simulating the blocky nature of categorical hazard models.*
+*Figure 1: Visual comparison of raw elevation data vs. `q2500` quantized terrain, simulating the smooth nature of categorical hazard models.*
 
 This provides a reasonable approximation of the categorical nature of global hazard data (such as flood models or climate bands), allowing us to rigorously benchmark how different formats handle spatial scaling.
 
