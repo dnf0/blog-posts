@@ -19,12 +19,12 @@ When accounting for the dimensionality of climate modeling—12 years, 4 emissio
 
 A primary constraint of this system is that the API must execute synchronous, low-latency extractions for batches of up to 1,000 irregular polygons at a time. If a user queries 1,000 catchments or property boundaries on a map, the hazard analytics must be returned within synchronous API timeout limits.
 
-To empirically test architectures for this challenge, we use a 6°×6° Copernicus Digital Elevation Model (DEM) [1] covering the Swiss Alps (1.7GB, ~466M pixels). By applying a `q2500` quantization (rounding elevations into 2,500m buckets), we artificially transform the varying mountain terrain into uniform blocks (see Figure 1). 
+To empirically test architectures for this challenge, we use a 6°×6° Copernicus Digital Elevation Model (DEM) [1] covering the Swiss Alps (1.7GB, ~466M pixels). To simulate the categorical nature of global hazard data (such as flood models or climate bands), we apply multiple levels of quantization (`q100`, `q1000`, and `q2500`), which round the continuous elevation values into distinct buckets. 
 
 ![Quantization Comparison](/plots/00_quantization_visual.png)
-*Figure 1: Visual comparison of raw elevation data vs. `q2500` quantized terrain, simulating the smooth nature of categorical hazard models.*
+*Figure 1: Visual comparison of raw elevation data vs. `q2500` quantized terrain, illustrating the transformation into smooth, uniform blocks.*
 
-This provides a reasonable approximation of the categorical nature of global hazard data (such as flood models or climate bands), allowing us to rigorously benchmark how different formats handle spatial scaling.
+We evaluate multiple quantizations to artificially control the spatial contiguity of the data. A fine `q100` quantization produces highly volatile, fragmented regions, while a coarse `q2500` quantization produces massive, smooth, uniform blocks. This allows us to rigorously benchmark how different compression algorithms (like Quadtree Compaction and Run-Length Encoding) scale when encountering varying levels of physical spatial contiguity.
 
 ## Benchmark Environment & Hardware Constraints
 To ensure reproducibility and transparency, it is critical to define the constraints of the benchmark environment:
