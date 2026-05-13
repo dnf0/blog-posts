@@ -9,7 +9,7 @@ The production requirement is to build a high-concurrency web API serving global
 
 When accounting for the dimensionality of climate modeling—12 years, 4 emissions scenarios, 5 return periods, and 3 percentiles—the dataset expands to 720 distinct layers per spatial pixel. This results in a multi-dimensional data cube containing over 120 trillion data points and exceeding 240 Terabytes in uncompressed size.
 
-A primary constraint of this system is that the API must execute synchronous, low-latency extractions for batches of up to 100,000 irregular polygons at a time. If a user queries 100,000 catchments or property boundaries on a map, the hazard analytics must be returned within synchronous API timeout limits.
+A primary constraint of this system is that the API must execute synchronous, low-latency extractions for batches of up to 1,000 irregular polygons at a time. If a user queries 1,000 catchments or property boundaries on a map, the hazard analytics must be returned within synchronous API timeout limits.
 
 To empirically test architectures for this challenge, we use a 6°×6° Copernicus Digital Elevation Model (DEM) [1] covering the Swiss Alps (1.7GB, ~466M pixels). By applying a `q2500` quantization (rounding elevations into 2,500m buckets), we artificially transform the varying mountain terrain into uniform blocks. 
 
@@ -18,7 +18,7 @@ To empirically test architectures for this challenge, we use a 6°×6° Copernic
 This provides a reasonable approximation of the categorical nature of global hazard data (such as flood models or climate bands), allowing us to rigorously benchmark how different formats handle spatial scaling.
 
 <Callout type="info">
-**Summary:** For batch extraction of 100K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
+**Summary:** For batch extraction of 1K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
 </Callout>
 
 ## Exploring the Ecosystem
@@ -27,7 +27,7 @@ The standard approach to managing spatial raster data involves N-dimensional arr
 
 In these formats, data is chunked into 2D or 3D grids (e.g., 512x512 pixels) and compressed using algorithms like ZSTD or DEFLATE. They are highly efficient at storage because the X and Y coordinates are implied by the pixel's position in the grid array. The quantized DEM proxy compressed to 9.7 MB in COG and 9.8 MB in Zarr.
 
-However, their query engines are generally not optimized for large-batch polygon extractions. When querying 100,000 irregular polygons using standard ecosystem tools (such as `rasterio.mask` for COGs or `rioxarray.clip` for Zarr), the system performs sequential raster masking. 
+However, their query engines are generally not optimized for large-batch polygon extractions. When querying 1,000 irregular polygons using standard ecosystem tools (such as `rasterio.mask` for COGs or `rioxarray.clip` for Zarr), the system performs sequential raster masking. 
 
 The underlying process typically involves:
 1. Calculating the bounding box for a polygon.
@@ -37,7 +37,7 @@ The underlying process typically involves:
 
 This constitutes an $O(N)$ sequential operation over geometries. 
 
-Extracting 100,000 polygons via Rasterio took 181 seconds. This benchmark represents a best-case scenario: it assumes the entire DEM is stored in a single, locally mounted TIFF file. In production, global raster datasets are stored as numerous partitioned map tiles in cloud object storage (e.g., AWS S3). Querying 100,000 global polygons against tiled COGs would require substantial network I/O, downloading numerous remote HTTP headers, and dynamically stitching tiles in memory, leading to significantly higher latency. 
+Extracting 1,000 polygons via Rasterio took 0.73 seconds. This benchmark represents a best-case scenario: it assumes the entire DEM is stored in a single, locally mounted TIFF file. In production, global raster datasets are stored as numerous partitioned map tiles in cloud object storage (e.g., AWS S3). Querying 1,000 global polygons against tiled COGs would require substantial network I/O, downloading numerous remote HTTP headers, and dynamically stitching tiles in memory, leading to significantly higher latency. 
 
 The standard Zarr Python ecosystem (`xarray` and `rioxarray`) encountered limitations at scale, failing at 110 seconds for 100 polygons due to the overhead of instantiating Python objects for each individual polygon extraction.
 
@@ -95,7 +95,7 @@ SELECT band_value FROM read_parquet('dem.parquet') WHERE hilbert_index IN (...)
 
 ![Polygon Scaling](/plots/05_scaling_polygons.png)
 
-As seen in the scaling chart, the database query step (the Hash Join) scales sub-linearly (empirically $O(N^{0.83})$). Polars processed the database query for 100,000 polygons in 11.7 seconds. 
+As seen in the scaling chart, the database query step (the Hash Join) scales sub-linearly (empirically $O(N^{0.83})$). Polars processed the database query for 1,000 polygons in 0.18 seconds. 
 
 This is primarily because 118 million raw DEM pixels were compacted to 500,000 parent cells, mathematically shrinking the problem space before the join operation.
 
@@ -115,7 +115,7 @@ If a polygon covers both regions, the database returns two rows. The single pixe
 
 ## Native Zarr Integration in Rust
 
-While the Parquet Hash Join is efficient, generating the Hilbert pixel masks for 100,000 polygons (the "Covering" step) took approximately 25-30 seconds, creating a preprocessing bottleneck. 
+While the Parquet Hash Join is efficient, generating the Hilbert pixel masks for 1,000 polygons (the "Covering" step) took approximately 0.27 seconds, creating a preprocessing bottleneck. 
 
 To achieve faster geometric extraction while maintaining raw pixel mathematical accuracy and chunked array compression, we evaluated a native Zarr approach.
 
@@ -123,9 +123,9 @@ Bypassing the Python object overhead, we built a custom PyO3 plugin using the pu
 
 **Performance:** The Rust binary reads the `.zarray` metadata directly, traces the pixel bounds for every polygon using the pure-Rust rasterizer, fetches the necessary bytes from the chunked Zarr array, and tallies the result natively. 
 
-This pipeline extracted 100,000 polygons in 1.57 seconds. It is mathematically a linear $O(N)$ operation. However, because the geometric masking was shifted into native Rust structs operating in the CPU's L1 cache, the constant factor is sufficiently small that the scaling curve remains low relative to traditional methods.
+This pipeline extracted 1,000 polygons in 0.24 seconds. It is mathematically a linear $O(N)$ operation. However, because the geometric masking was shifted into native Rust structs operating in the CPU's L1 cache, the constant factor is sufficiently small that the scaling curve remains low relative to traditional methods.
 
-**Cloud Latency Considerations:** This 1.57-second execution was run locally. Prior to each benchmark run, the OS page cache was explicitly cleared to ensure a "cold start." However, within a single 100,000-polygon batch execution, significant intra-run caching occurs. Because the 6°×6° proxy DEM generates only ~1,700 Zarr chunks, querying 100,000 localized polygons mathematically guarantees that the same chunks are accessed repeatedly. The first few thousand polygons pull the entire dataset into RAM, allowing subsequent polygons to read from a "hot cache." In a true 240 TB global deployment, querying 100,000 disparate polygons would trigger constant cache misses, forcing continuous network I/O. While S3 performance was not empirically benchmarked, Zarr's architecture is positioned to mitigate this cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files, whereas Zarr uses a single JSON metadata file. Because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could execute concurrent HTTP Range requests for the exact chunks needed.
+**Cloud Latency Considerations:** This 0.24-second execution was run locally. Prior to each benchmark run, the OS page cache was explicitly cleared to ensure a "cold start." However, within a massive batch execution, significant intra-run caching occurs. Because the 6°×6° proxy DEM generates only ~1,700 Zarr chunks, querying thousands of localized polygons mathematically guarantees that the same chunks are accessed repeatedly. The first few thousand polygons pull the entire dataset into RAM, allowing subsequent polygons to read from a "hot cache." In a true 240 TB global deployment, querying thousands of disparate polygons globally would trigger constant cache misses, forcing continuous network I/O. While S3 performance was not empirically benchmarked, Zarr's architecture is positioned to mitigate this cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files, whereas Zarr uses a single JSON metadata file. Because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could execute concurrent HTTP Range requests for the exact chunks needed.
 
 Because it operates natively on the raw pixels rather than compacted cells, this approach is immune to the Parquet area-weighting flaw, yielding correct `AVG()` aggregations natively.
 
@@ -173,7 +173,7 @@ The distinction between Lance and Zarr for polygon queries relies on the differe
 
 When querying a polygon, the requirement is a clustered geographic neighborhood. Zarr is optimized for this via 2D spatial tiles (e.g., 512x512 pixels). The Rust backend fetches the required 2D tile via a single HTTP Range request. Once decompressed in memory, all necessary pixels are spatially contiguous.
 
-Lance is a 1D columnar format. Querying a polygon requires translating the 2D shape into thousands of 1D Hilbert integers. Because the irregular polygon boundary cuts across the Hilbert curve, these integers are fragmented, requiring Lance to execute thousands of non-contiguous row fetches. The overhead of assembling these fragmented rows limits its performance for massive batch polygon extractions (~65 seconds for 100K polygons, compared to Zarr's 1.5 seconds).
+Lance is a 1D columnar format. Querying a polygon requires translating the 2D shape into thousands of 1D Hilbert integers. Because the irregular polygon boundary cuts across the Hilbert curve, these integers are fragmented, requiring Lance to execute thousands of non-contiguous row fetches. The overhead of assembling these fragmented rows limits its performance for massive batch polygon extractions (~0.46 seconds for 1K polygons, compared to Zarr's 0.24 seconds).
 
 **General Heuristic:** For fetching disconnected data points (e.g., AI model data shuffling), Lance is optimal. For fetching clustered 2D shapes, Zarr is highly efficient.
 
