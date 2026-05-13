@@ -10,7 +10,7 @@ description: "An empirical benchmark of architectural approaches for synchronous
 *May 10, 2026 • 18 min read • Tags: `geospatial`, `python`, `rust`, `zarr`, `polars`, `benchmarking`, `data-engineering`*
 
 <Callout type="info">
-**TL;DR:** To build a high-concurrency API capable of synchronously querying 240 TB of multi-dimensional global hazard data, you must overcome the $O(N)$ bottlenecks of traditional raster masking. After benchmarking several architectures, I found that for batch extraction of 1K+ exclusive (i.e., non-overlapping) polygons representing distinct queries, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
+**TL;DR:** To build a high-concurrency API capable of synchronously querying hundreds of terabytes of multi-dimensional global hazard data, you must overcome the $O(N)$ bottlenecks of traditional raster masking. After benchmarking several architectures, I found that for batch extraction of 1K+ exclusive (i.e., non-overlapping) globally disparate polygons representing distinct queries—with the ideal goal of loading many thousands per second—a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
 </Callout>
 
 The overarching objective of this engineering initiative is to design and build a high-concurrency web API capable of serving global climate hazard data at scale. The physical scope of this task is substantial: the target spatial resolution is 30m across all of Earth's landmass, which equates to approximately 166 billion pixels per layer. 
