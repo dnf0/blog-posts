@@ -194,11 +194,11 @@ def plot_scaling_assessment() -> None:
     # Restructure data to show Query Time vs Total Time explicitly
     plot_data = []
     
-    # Calculate O(N) baseline from Rasterio at N=10
-    rasterio_10 = df[(df["tool"] == "Rasterio + COG") & (df["batch_size"] == 10)]
+    # Calculate O(N) baseline from Rasterio at N=1000 (where thread overhead is amortised)
+    rasterio_1000 = df[(df["tool"] == "Rasterio + COG") & (df["batch_size"] == 1000)]
     baseline_time_per_poly = 0
-    if not rasterio_10.empty:
-        baseline_time_per_poly = rasterio_10.iloc[0]["total_time_s"] / 10.0
+    if not rasterio_1000.empty:
+        baseline_time_per_poly = rasterio_1000.iloc[0]["total_time_s"] / 1000.0
 
     for _, row in df.iterrows():
         if "Rasterio" in row["tool"]:
