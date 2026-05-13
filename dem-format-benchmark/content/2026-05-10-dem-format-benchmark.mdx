@@ -61,7 +61,7 @@ This linear scaling is insufficient for synchronous Web API constraints, necessi
 
 An alternative approach is treating spatial data as tabular data (see Figure 2). By flattening the data into a columnar format like Parquet [4], we can utilize relational database engines like DuckDB [5] or Polars [6].
 
-A known limitation of this approach is the "Coordinate Tax". Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or WKB geometries) for every pixel. This introduces significant storage overhead. A flat Parquet file for the proxy DEM required hundreds of megabytes.
+A known limitation of this approach is the "Coordinate Tax". Traditional Parquet and GeoParquet store explicit `x` and `y` coordinates (or WKB geometries) for every pixel. This introduces significant storage overhead. An uncompacted, flat Parquet file with raw explicit X/Y coordinates for the 6°×6° proxy DEM required over 1.1 GB.
 
 To eliminate this overhead, we utilised a Native 2D Hilbert Curve [7]. By mapping the global 1-arc-second grid `(col, row)` to a 1D Hilbert integer using bitwise XOR rotations, the index replaces the explicit location coordinates.
 
@@ -73,7 +73,7 @@ Unlike COG and Zarr (which compress fixed blocks using DEFLATE/ZSTD), Quadtree C
 
 This process recursively ascends 16 levels of the quadtree. For uniform areas, millions of pixels collapse into larger parent cells, functioning as a 2D Run-Length Encoder. 
 
-Applying this to the Hilbert Parquet file reduced the file size from 1.7 GB to 2.8 MB. (Note that this is slightly larger than COG at 2.4 MB and Zarr at 1.7 MB, because Parquet must still explicitly store the 1D Hilbert index column for every cell, whereas N-dimensional arrays imply locations entirely by position).
+Applying this Quadtree Compaction to the `q2500` Hilbert Parquet file reduced the file size from the 1.1 GB raw baseline down to just 2.8 MB. (Note that this compacted Parquet file is slightly larger than the `q2500` COG at 2.4 MB and Zarr at 1.7 MB, because Parquet must still explicitly store the 1D Hilbert index column for every cell, whereas N-dimensional arrays imply locations entirely by position).
 
 ### Evaluating Vectorized Hash Joins
 
@@ -149,7 +149,7 @@ To empirically prove this, we tracked the exact disk I/O required to extract a s
 
 **The Parquet Zone Map Trap:** Why did DuckDB read 689 MB of data? Parquet uses "Zone Maps" (min/max metadata per Row Group) to quickly skip irrelevant data (Predicate Pushdown). When DuckDB queries the polygon, it looks at the absolute lowest and highest Hilbert integer inside the polygon and tells Parquet to fetch every Row Group that falls within that range. Because the 1D Hilbert curve snakes back and forth across the 2D map, a tiny geographic polygon can span a massive numeric range. DuckDB fetched 735 Row Groups, decompressed them into RAM, and then realized 99% of the rows belonged to neighboring towns outside the polygon. 
 
-**The Coordinate Tax Reconsidered (2D Zone Maps):** Is there a way to solve this Parquet overfetching without abandoning the format? Yes, but it requires paying the "Coordinate Tax" we initially tried to avoid. If we add the explicit X and Y coordinates (or a coarse 2D `grid_id`) back into the uncompacted Parquet file, the file size bloats from 319 MB to roughly 528 MB. However, because Parquet maintains Zone Maps for *every* column, we can structure our query to include a 2D bounding box: `WHERE x >= min_x AND x <= max_x AND z_index IN (...)`. DuckDB will evaluate the X/Y Zone Maps first, allowing it to instantly prune the hundreds of irrelevant Row Groups that the 1D Hilbert index dragged in. We empirically tested this, and DuckDB's scan time dropped to near zero. This represents the ultimate architectural tradeoff: you can pay for storage (528 MB Parquet) to fix your I/O, or you can use Native Zarr to keep the file size tiny (1.7 MB) while inherently maintaining 2D chunk bounds.
+**The Coordinate Tax Reconsidered (2D Zone Maps):** Is there a way to solve this Parquet overfetching without abandoning the format? Yes, but it requires paying the "Coordinate Tax" we initially tried to avoid. If we add the explicit X and Y coordinates (or a coarse 2D `grid_id`) back into the uncompacted `q2500` Hilbert Parquet file, the file size bloats from 319 MB to roughly 528 MB. However, because Parquet maintains Zone Maps for *every* column, we can structure our query to include a 2D bounding box: `WHERE x >= min_x AND x <= max_x AND z_index IN (...)`. DuckDB will evaluate the X/Y Zone Maps first, allowing it to instantly prune the hundreds of irrelevant Row Groups that the 1D Hilbert index dragged in. We empirically tested this, and DuckDB's scan time dropped to near zero. This represents the ultimate architectural tradeoff: you can pay for storage (528 MB for the uncompacted Parquet file with X/Y coordinates) to fix your I/O, or you can use Native Zarr to keep the file size tiny (1.7 MB for `q2500` Zarr) while inherently maintaining 2D chunk bounds.
 
 Therefore, to read a single polygon, a columnar database relying solely on a 1D spatial index downloads and decompresses significantly more irrelevant data blocks than Zarr, which cleanly bounds the overfetching to a few 2D spatial chunks.
 
