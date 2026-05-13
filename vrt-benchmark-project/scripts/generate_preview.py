@@ -18,6 +18,8 @@ full_html = f"""
   img {{ max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-top: 20px; }}
   h1, h2, h3 {{ border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }}
   .callout {{ padding: 15px; margin: 20px 0; border: 1px solid #eee; border-left-width: 5px; border-radius: 3px; border-left-color: #0366d6; background-color: #f1f8ff; }}
+  a {{ color: #4b5563; text-decoration: underline; text-decoration-color: #9ca3af; text-underline-offset: 3px; transition: color 0.2s ease, text-decoration-color 0.2s ease; }}
+  a:hover {{ color: #111827; text-decoration-color: #4b5563; }}
 </style>
 </head>
 <body>
