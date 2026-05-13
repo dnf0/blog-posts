@@ -77,13 +77,7 @@ An alternative approach is treating spatial data as tabular data. By flattening 
 
 ### Quadtree Compaction
 
-Because the hazard data proxy contains contiguous uniform regions, compression can be improved through Quadtree Compaction. 
-
-Unlike COG and Zarr (which compress fixed blocks using DEFLATE/ZSTD), Quadtree Compaction recursively merges identical spatial data using bit-shifting. The hierarchy is encoded into the integer itself: shifting a Hilbert code to the right by 2 bits (`d >> 2`) yields the ID of its parent. If four identical adjacent 30m child pixels share the same elevation value, they are replaced by a single 60m parent cell. 
-
-This process recursively ascends 16 levels of the quadtree. For uniform areas, millions of pixels collapse into larger parent cells, functioning as a 2D Run-Length Encoder. 
-
-Applying this Quadtree Compaction to the `q2500` Hilbert Parquet file reduced the file size from the 1.1 GB raw baseline down to just 2.8 MB. (Note that this compacted Parquet file is slightly larger than the `q2500` COG at 2.4 MB and Zarr at 1.7 MB, because Parquet must still explicitly store the 1D Hilbert index column for every cell, whereas N-dimensional arrays imply locations entirely by position). (see Figure 2).
+Because the hazard data proxy contains contiguous uniform regions, compression can be improved through Quadtree Compaction. Unlike COG and Zarr (which compress fixed blocks using DEFLATE/ZSTD), Quadtree Compaction recursively merges identical spatial data using bit-shifting. The hierarchy is encoded into the integer itself: shifting a Hilbert code to the right by 2 bits (`d >> 2`) yields the ID of its parent. If four identical adjacent 30m child pixels share the same elevation value, they are replaced by a single 60m parent cell. This process recursively ascends 16 levels of the quadtree. For uniform areas, millions of pixels collapse into larger parent cells, functioning as a 2D Run-Length Encoder. Applying this Quadtree Compaction to the `q2500` Hilbert Parquet file reduced the file size from the 1.1 GB raw baseline down to just 2.8 MB. (Note that this compacted Parquet file is slightly larger than the `q2500` COG at 2.4 MB and Zarr at 1.7 MB, because Parquet must still explicitly store the 1D Hilbert index column for every cell, whereas N-dimensional arrays imply locations entirely by position). (see Figure 2).
 
 ![Storage size by format](/plots/01_storage_size.png)
 *Figure 2: Storage footprint of different architectural formats, illustrating the impact of the Coordinate Tax and Quadtree Compaction.*
@@ -138,7 +132,7 @@ To empirically prove this, I tracked the exact disk I/O required to extract a si
 
 Therefore, to read a single polygon, a columnar database relying solely on a 1D spatial index downloads and decompresses significantly more irrelevant data blocks than Zarr, which cleanly bounds the overfetching to a few 2D spatial chunks.
 
-**Tuning the Spatial Chunk Size (Read vs. Request Amplification):** It is important to note that the 512x512 chunk size is simply a default designed to balance compression ratios with read speeds. If a production API primarily queries very small polygons, fetching a 0.50 MB chunk is still an overfetch. The logical solution is to configure the Zarr writer to use smaller chunks. In my simulation for the exact same 23 KB polygon, configuring Zarr with `chunks=(128, 128)` caused it to touch 4 chunks, reducing the total download size to just **0.12 MB**. 
+**Tuning the Spatial Chunk Size (Read vs. Request Amplification):** It is important to note that the 512x512 chunk size is simply a default designed to balance compression ratios with read speeds. If a production API primarily queries very small polygons, fetching a 0.50 MB chunk is still an overfetch. The logical solution is to configure the Zarr writer to tune the chunk size based on the typical polygon size. In my simulation for the exact same 23 KB polygon, configuring Zarr with `chunks=(128, 128)` caused it to touch 4 chunks, reducing the total download size to just **0.12 MB**. 
 
 However, doing so introduces the fundamental trade-off of cloud I/O: **Read Amplification vs. Request Amplification**. 
 While smaller chunks significantly reduce the number of wasted bytes downloaded, they increase the number of HTTP Range requests required to cover a polygon (e.g., 4 requests instead of 1). In cloud storage like S3, Time-To-First-Byte (TTFB) latency is exceptionally high. Making 100 small HTTP requests is almost always slower and more expensive than making 1 large HTTP request. 
