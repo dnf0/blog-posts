@@ -123,6 +123,9 @@ Bypassing the Python object overhead, we built a custom PyO3 plugin using the pu
 
 **Performance:** The Rust binary reads the `.zarray` metadata directly, traces the pixel bounds for every polygon using the pure-Rust rasterizer, fetches the necessary bytes from the chunked Zarr array, and tallies the result natively. 
 
+![Polygon Extraction Latency](/plots/04_polygon_latency.png)
+*(Note: Hatched bars indicate architectures that timed out and failed to complete within the strict 30-second synchronous API constraint).*
+
 This pipeline extracted 1,000 polygons in 0.24 seconds. It is mathematically a linear $O(N)$ operation. However, because the geometric masking was shifted into native Rust structs operating in the CPU's L1 cache, the constant factor is sufficiently small that the scaling curve remains low relative to traditional methods.
 
 **Cloud Latency Considerations:** This 0.24-second execution was run locally. Prior to each benchmark run, the OS page cache was explicitly cleared to ensure a "cold start." However, within a massive batch execution, significant intra-run caching occurs. Because the 6°×6° proxy DEM generates only ~1,700 Zarr chunks, querying thousands of localized polygons mathematically guarantees that the same chunks are accessed repeatedly. The first few thousand polygons pull the entire dataset into RAM, allowing subsequent polygons to read from a "hot cache." In a true 240 TB global deployment, querying thousands of disparate polygons globally would trigger constant cache misses, forcing continuous network I/O. While S3 performance was not empirically benchmarked, Zarr's architecture is positioned to mitigate this cloud latency. Tiled COGs require downloading TIFF headers for multiple disparate files, whereas Zarr uses a single JSON metadata file. Because Native Zarr fetches raw byte-ranges, an asynchronous Rust backend could execute concurrent HTTP Range requests for the exact chunks needed.
