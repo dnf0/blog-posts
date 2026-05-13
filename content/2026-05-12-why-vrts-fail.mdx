@@ -33,5 +33,14 @@ test_bench_local_vrt                     94853.6251             96684.6250      
 
 Kerchunk, Zarr, and Lance bypass the massive overhead of dynamic parsing or large XML structures and are orders of magnitude faster than building a local VRT.
 
-# Conclusion
-Decision matrix on which architecture to use.
+# Conclusion: The Winning Architecture
+
+After assessing the performance and operational overhead of all 6 approaches, a clear winner emerges for our "busy tiles" use case.
+
+While "virtual" zero-copy references (like Kerchunk or VirtualiZarr) are incredibly fast, they introduce brittle dependencies on external HTTP servers and complex, large-scale Parquet indices that must be managed alongside the raw COGs.
+
+Instead, the most robust and performant architecture is to **physically rewrite the COGs into Zarr v3 Sharded Archives** (which can be done in parallel at lightning speeds using tools like `tensorstore` or Rust's `zarrs`). 
+
+Once the data is physically packaged as a native Zarr v3 archive, we can completely bypass slow backend Python tile servers. By hosting the Zarr archive directly on a static cloud bucket (like S3) and using **`zarr-layer` with MapLibre** on the frontend, the browser will dynamically fetch the binary chunks it needs and render them instantly on the GPU via client-side rendering.
+
+This architecture eliminates the VRT bottleneck, removes the need for expensive backend tile servers, and provides the absolute lowest latency for interactive web maps.
