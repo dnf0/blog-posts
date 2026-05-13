@@ -61,13 +61,7 @@ To fully understand the results, it is essential to detail the different archite
 
 ## Exploring the Ecosystem
 
-The standard approach to managing spatial raster data involves N-dimensional arrays, predominantly Cloud Optimised GeoTIFFs (COG) [2] or cloud-native Zarr stores [3]. 
-
-In these formats, data is chunked into 2D or 3D grids (e.g., 512x512 pixels) and compressed using algorithms like ZSTD or DEFLATE. They are highly efficient at storage because the X and Y coordinates are implied by the pixel's position in the grid array. The highly quantized DEM proxy compressed to 2.4 MB in COG and 1.7 MB in Zarr.
-
-However, their query engines are generally not optimised for large-batch polygon extractions. When querying 1,000 irregular polygons using standard ecosystem tools (such as `rasterio.mask` for COGs or `rioxarray.clip` for Zarr), the system performs sequential raster masking. 
-
-The underlying process typically involves:
+The standard approach to managing spatial raster data involves N-dimensional arrays, predominantly Cloud Optimised GeoTIFFs (COG) [2] or cloud-native Zarr stores [3]. In these formats, data is chunked into 2D or 3D grids (e.g., 512x512 pixels) and compressed using algorithms like ZSTD or DEFLATE. They are highly efficient at storage because the X and Y coordinates are implied by the pixel's position in the grid array. The highly quantized DEM proxy compressed to 2.4 MB in COG and 1.7 MB in Zarr. However, their query engines are generally not optimised for large-batch polygon extractions. When querying 1,000 irregular polygons using standard ecosystem tools (such as `rasterio.mask` for COGs or `rioxarray.clip` for Zarr), the system performs sequential raster masking. The underlying process typically involves:
 1. Calculating the bounding box for a polygon.
 2. Fetching and decompressing the intersecting spatial chunks.
 3. Rasterizing the polygon boundary into a binary mask array in memory.
