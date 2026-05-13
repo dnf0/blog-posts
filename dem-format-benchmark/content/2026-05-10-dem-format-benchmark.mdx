@@ -9,6 +9,10 @@ description: "An empirical benchmark of architectural approaches for synchronous
 
 *May 10, 2026 • Tags: `geospatial`, `python`, `rust`, `zarr`, `polars`, `benchmarking`*
 
+<Callout type="info">
+**TL;DR:** For batch extraction of 1K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
+</Callout>
+
 The production requirement is to build a high-concurrency web API serving global climate hazard data. The spatial resolution is 30m across all of Earth's landmass, equating to approximately 166 billion pixels per layer.
 
 When accounting for the dimensionality of climate modeling—12 years, 4 emissions scenarios, 5 return periods, and 3 percentiles—the dataset expands to 720 distinct layers per spatial pixel. This results in a multi-dimensional data cube containing over 120 trillion data points and exceeding 240 Terabytes in uncompressed size.
@@ -21,10 +25,6 @@ To empirically test architectures for this challenge, we use a 6°×6° Copernic
 *Figure 1: Visual comparison of raw elevation data vs. `q2500` quantized terrain, simulating the smooth nature of categorical hazard models.*
 
 This provides a reasonable approximation of the categorical nature of global hazard data (such as flood models or climate bands), allowing us to rigorously benchmark how different formats handle spatial scaling.
-
-<Callout type="info">
-**Summary:** For batch extraction of 1K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides an optimal balance of storage compression, analytical accuracy, and synchronous API performance.
-</Callout>
 
 ## Exploring the Ecosystem
 
