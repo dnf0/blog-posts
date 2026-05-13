@@ -26,6 +26,12 @@ To empirically test architectures for this challenge, we use a 6°×6° Copernic
 
 This provides a reasonable approximation of the categorical nature of global hazard data (such as flood models or climate bands), allowing us to rigorously benchmark how different formats handle spatial scaling.
 
+## Benchmark Environment & Hardware Constraints
+To ensure reproducibility and transparency, it is critical to define the constraints of the benchmark environment:
+*   **Hardware:** Apple MacBook M4, 12 cores, 24 GB RAM.
+*   **Storage:** Local NVMe SSD.
+*   **Concurrency Model:** Standard Python ecosystem tests (Rasterio, Xarray) were executed using single-threaded sequential loops over the polygons, representing the typical constraints of the Python Global Interpreter Lock (GIL). Conversely, the pure-Rust backend (`zarrs` and `geo-rasterize`) and the Hilbert coverer (`polars_hilbert`) explicitly utilized multi-threading via the `rayon` crate, leveraging all 12 cores. DuckDB and Polars naturally utilized multi-threading for their tabular Hash Joins. 
+
 ## Exploring the Ecosystem
 
 The standard approach to managing spatial raster data involves N-dimensional arrays, predominantly Cloud Optimized GeoTIFFs (COG) [2] or cloud-native Zarr stores [3]. 
