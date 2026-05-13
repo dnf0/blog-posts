@@ -187,7 +187,7 @@ When the Rust backend queries the globe, it:
 3. Parses the index to locate the byte-offset of the specific 512x512 inner chunk.
 4. Executes a second HTTP Range request to fetch the required bytes.
 
-This approach preserves the read performance of small chunks while significantly reducing the total number of files in the storage bucket. Furthermore, because global hazard data typically follows a "Write Once, Read Many" (WORM) lifecycle, the shard index never changes. The Rust backend can aggressively cache these indices in RAM. This entirely neutralises the "double-fetch" penalty of Sharding, allowing all subsequent API queries to instantly locate the inner chunk and fetch the required data with a single HTTP Range request.
+This approach preserves the read performance of small chunks while significantly reducing the total number of files in the storage bucket. Furthermore, because global hazard data typically follows a "Write Once, Read Many" (WORM) lifecycle, the shard index never changes. The Rust backend can aggressively cache these indices in RAM. Because user queries are frequently localised to common geographic tiles or regions, this caching strategy is highly effective. It entirely neutralises the "double-fetch" penalty of Sharding, allowing all subsequent API queries within that shard to instantly locate the inner chunk and fetch the required data with a single HTTP Range request.
 
 
 ### Architectural Summary Matrix
