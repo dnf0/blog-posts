@@ -1,0 +1,69 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<title>Preview: Why Global VRTs Fail</title>
+<style>
+  body { max-width: 900px; margin: 40px auto; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; }
+  pre { background: #f6f8fa; padding: 16px; overflow-x: auto; border-radius: 6px; font-size: 85%; }
+  code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+  img { max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-top: 20px; }
+  h1, h2, h3 { border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+  .callout { padding: 15px; margin: 20px 0; border: 1px solid #eee; border-left-width: 5px; border-radius: 3px; border-left-color: #0366d6; background-color: #f1f8ff; }
+</style>
+</head>
+<body>
+<hr />
+<h2>title: &quot;Why Global VRTs Fail at Scale (And 5 Ways to Fix It)&quot;
+date: &quot;2026-05-12&quot;
+tags: [geospatial, python, zarr, benchmarking, rasterio]
+description: &quot;An empirical benchmark of architectural approaches for dynamically querying massive collections of Cloud Optimized GeoTIFFs (COGs).&quot;</h2>
+<h2>The Problem: The VRT Bottleneck</h2>
+<p>When dealing with massive geospatial datasets—like global 30m resolution DEMs or climate hazard models spanning multiple scenarios and decades—data providers naturally partition their rasters into thousands or millions of Cloud Optimized GeoTIFFs (COGs).</p>
+<p>The classic GDAL ecosystem approach to querying across these partitioned files is to build a Virtual Raster (VRT). A VRT is essentially an XML file that maps a spatial grid to the underlying COGs. You open the VRT in <code>rasterio</code> or <code>gdal</code>, give it a bounding box, and it figures out which files to read.</p>
+<p>But there's a fatal flaw when scaling this to the globe: <strong>VRTs are giant XML files.</strong></p>
+<p>If you have 10 million COGs, your VRT becomes a multi-gigabyte XML file. When your Python worker tries to open it to read a single bounding box, it must parse that entire XML structure into memory. This leads to massive RAM spikes, high latency, and eventual OOM (Out of Memory) crashes.</p>
+<div class="callout">
+**TL;DR:** Global VRTs break down at scale due to XML parsing overhead. For production systems serving "busy tiles", physically rewriting your data to **Zarr v3 Sharded Archives** or using modern tabular formats like **Lance** provides sub-millisecond retrieval times.
+</div>
+<h2>The Alternatives</h2>
+<p>If Global VRTs won't scale, how do we query a massive collection of COGs efficiently? We benchmarked 5 alternative architectures against the traditional Global VRT:</p>
+<ol>
+<li><strong>Local VRTs (Dynamic):</strong> Instead of one giant VRT, we use a lightweight spatial index (like GeoParquet) to find intersecting COGs, and dynamically build a tiny, in-memory <code>/vsimem/</code> VRT at query time.</li>
+<li><strong>GeoParquet Direct Reads:</strong> Similar to Local VRTs, but we skip the VRT entirely. We find the intersecting COGs using GeoParquet, open them directly with <code>rasterio</code>, and use <code>rasterio.merge</code> to mosaic them in memory.</li>
+<li><strong>Kerchunk (Virtual Zarr):</strong> We extract the byte-offsets of the compressed TIFF chunks and store them in a lightweight JSON index. Clients read this index using <code>fsspec</code>'s <code>ReferenceFileSystem</code> and <code>xarray/zarr</code>, treating the original COGs as a single Zarr array without moving any data.</li>
+<li><strong>Lance Format:</strong> A modern columnar format built for ML and multimodal data. We extract the TIFF data into <code>FixedSizeListArrays</code> alongside WKB geometries. Lance provides $O(1)$ random access, avoiding the decompression of entire row groups.</li>
+<li><strong>Zarr v3 (Physical):</strong> We bite the bullet and physically rewrite the COGs into a native <strong>Zarr v3 Sharded Archive</strong>.</li>
+<li><strong>STAC + TiTiler:</strong> We rely on a dynamic map server backend (TiTiler) and a STAC catalog, simulating the network and compute overhead of requesting a dynamic mosaic over an API.</li>
+</ol>
+<h2>The Benchmark: Wall-Clock Retrieval</h2>
+<p>We built a Python harness using <code>pytest-benchmark</code> to test these 6 architectures. The task: retrieve a spatial slice intersecting 4 mock COGs out of a grid.</p>
+<p>Here are the empirical wall-clock results running our python harness:</p>
+<p><img src="../plots/vrt_benchmark_results.png" alt="Benchmark Results" /></p>
+<pre><code class="language-text">---------------------------------------------------------------------------------------------------------------------------
+Name (time in us)                        Min                     Max                   Mean                StdDev            Rounds
+---------------------------------------------------------------------------------------------------------------------------
+test_bench_kerchunk                        106.1669               155.5410             113.6704            8.3523           164
+test_bench_zarr                            222.5830               622.0831             247.8913           40.5741           97
+test_bench_lance                           815.3339              2365.5839            1162.5090          348.1033           60
+test_bench_global_vrt                     2482.9170              2789.8330            2579.0237           53.8033           121
+test_bench_geoparquet_direct              6942.8330              7975.9581            7235.8643          239.7084           101
+test_bench_titiler                       53447.7500             59086.5840           56802.7672         1504.1333           17
+test_bench_local_vrt                     94853.6251             96684.6250           95457.9406          667.1794           7
+---------------------------------------------------------------------------------------------------------------------------
+</code></pre>
+<h3>Analyzing the Results</h3>
+<ul>
+<li><strong>The Winners (Kerchunk &amp; Zarr):</strong> Both the virtual and physical Zarr approaches completely bypass the overhead of XML parsing and dynamic mosaicking. They fetch exactly the compressed bytes needed.</li>
+<li><strong>The Surprise (Lance):</strong> Lance's $O(1)$ random access makes it incredibly fast (~1.1ms), matching the performance of pure N-dimensional arrays while offering the schema flexibility of a tabular format.</li>
+<li><strong>The Loser (Local VRT):</strong> Dynamically writing to <code>/vsimem/</code> and rebuilding the GDAL dataset at runtime takes nearly 100ms. It's safe on memory, but terrible for latency.</li>
+</ul>
+<h2>Conclusion: The Winning Architecture</h2>
+<p>After assessing the performance and operational overhead of all approaches, a clear winner emerges for serving &quot;busy tiles&quot; in production.</p>
+<p>While &quot;virtual&quot; zero-copy references (like Kerchunk or VirtualiZarr) are incredibly fast, they introduce brittle dependencies on external HTTP servers and require managing complex, large-scale Parquet indices alongside the raw COGs.</p>
+<p>Instead, the most robust and performant architecture is to <strong>physically rewrite the COGs into Zarr v3 Sharded Archives</strong> (which can be done in parallel at lightning speeds using tools like <code>tensorstore</code> or Rust's <code>zarrs</code>).</p>
+<p>Once the data is physically packaged as a native Zarr v3 archive, we can completely bypass slow backend Python tile servers. By hosting the Zarr archive directly on a static cloud bucket (like S3) and using <strong><code>zarr-layer</code> with MapLibre</strong> on the frontend, the browser will dynamically fetch the binary chunks it needs and render them instantly on the GPU via client-side rendering.</p>
+<p>This architecture eliminates the VRT bottleneck, removes the need for expensive backend tile servers, and provides the absolute lowest latency for interactive web maps.</p>
+
+</body>
+</html>

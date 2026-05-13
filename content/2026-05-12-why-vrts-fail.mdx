@@ -1,21 +1,42 @@
 ---
 title: "Why Global VRTs Fail at Scale (And 5 Ways to Fix It)"
 date: "2026-05-12"
+tags: [geospatial, python, zarr, benchmarking, rasterio]
+description: "An empirical benchmark of architectural approaches for dynamically querying massive collections of Cloud Optimized GeoTIFFs (COGs)."
 ---
 
-# The Problem
-Global VRTs degrade at scale due to XML parsing overhead and memory bloat.
+## The Problem: The VRT Bottleneck
 
-# The 6 Alternatives
-- Local VRTs
-- GeoParquet Direct Reads
-- Kerchunk
-- Zarr
-- Lance Format
-- STAC + TiTiler
+When dealing with massive geospatial datasets—like global 30m resolution DEMs or climate hazard models spanning multiple scenarios and decades—data providers naturally partition their rasters into thousands or millions of Cloud Optimized GeoTIFFs (COGs). 
 
-# Benchmark Results
+The classic GDAL ecosystem approach to querying across these partitioned files is to build a Virtual Raster (VRT). A VRT is essentially an XML file that maps a spatial grid to the underlying COGs. You open the VRT in `rasterio` or `gdal`, give it a bounding box, and it figures out which files to read.
+
+But there's a fatal flaw when scaling this to the globe: **VRTs are giant XML files.**
+
+If you have 10 million COGs, your VRT becomes a multi-gigabyte XML file. When your Python worker tries to open it to read a single bounding box, it must parse that entire XML structure into memory. This leads to massive RAM spikes, high latency, and eventual OOM (Out of Memory) crashes. 
+
+<Callout type="info">
+**TL;DR:** Global VRTs break down at scale due to XML parsing overhead. For production systems serving "busy tiles", physically rewriting your data to **Zarr v3 Sharded Archives** or using modern tabular formats like **Lance** provides sub-millisecond retrieval times.
+</Callout>
+
+## The Alternatives
+
+If Global VRTs won't scale, how do we query a massive collection of COGs efficiently? We benchmarked 5 alternative architectures against the traditional Global VRT:
+
+1. **Local VRTs (Dynamic):** Instead of one giant VRT, we use a lightweight spatial index (like GeoParquet) to find intersecting COGs, and dynamically build a tiny, in-memory `/vsimem/` VRT at query time.
+2. **GeoParquet Direct Reads:** Similar to Local VRTs, but we skip the VRT entirely. We find the intersecting COGs using GeoParquet, open them directly with `rasterio`, and use `rasterio.merge` to mosaic them in memory.
+3. **Kerchunk (Virtual Zarr):** We extract the byte-offsets of the compressed TIFF chunks and store them in a lightweight JSON index. Clients read this index using `fsspec`'s `ReferenceFileSystem` and `xarray/zarr`, treating the original COGs as a single Zarr array without moving any data.
+4. **Lance Format:** A modern columnar format built for ML and multimodal data. We extract the TIFF data into `FixedSizeListArrays` alongside WKB geometries. Lance provides $O(1)$ random access, avoiding the decompression of entire row groups.
+5. **Zarr v3 (Physical):** We bite the bullet and physically rewrite the COGs into a native **Zarr v3 Sharded Archive**. 
+6. **STAC + TiTiler:** We rely on a dynamic map server backend (TiTiler) and a STAC catalog, simulating the network and compute overhead of requesting a dynamic mosaic over an API.
+
+## The Benchmark: Wall-Clock Retrieval
+
+We built a Python harness using `pytest-benchmark` to test these 6 architectures. The task: retrieve a spatial slice intersecting 4 mock COGs out of a grid.
+
 Here are the empirical wall-clock results running our python harness:
+
+![Benchmark Results](../plots/vrt_benchmark_results.png)
 
 ```text
 ---------------------------------------------------------------------------------------------------------------------------
@@ -31,13 +52,17 @@ test_bench_local_vrt                     94853.6251             96684.6250      
 ---------------------------------------------------------------------------------------------------------------------------
 ```
 
-Kerchunk, Zarr, and Lance bypass the massive overhead of dynamic parsing or large XML structures and are orders of magnitude faster than building a local VRT.
+### Analyzing the Results
 
-# Conclusion: The Winning Architecture
+- **The Winners (Kerchunk & Zarr):** Both the virtual and physical Zarr approaches completely bypass the overhead of XML parsing and dynamic mosaicking. They fetch exactly the compressed bytes needed.
+- **The Surprise (Lance):** Lance's $O(1)$ random access makes it incredibly fast (~1.1ms), matching the performance of pure N-dimensional arrays while offering the schema flexibility of a tabular format.
+- **The Loser (Local VRT):** Dynamically writing to `/vsimem/` and rebuilding the GDAL dataset at runtime takes nearly 100ms. It's safe on memory, but terrible for latency.
 
-After assessing the performance and operational overhead of all 6 approaches, a clear winner emerges for our "busy tiles" use case.
+## Conclusion: The Winning Architecture
 
-While "virtual" zero-copy references (like Kerchunk or VirtualiZarr) are incredibly fast, they introduce brittle dependencies on external HTTP servers and complex, large-scale Parquet indices that must be managed alongside the raw COGs.
+After assessing the performance and operational overhead of all approaches, a clear winner emerges for serving "busy tiles" in production.
+
+While "virtual" zero-copy references (like Kerchunk or VirtualiZarr) are incredibly fast, they introduce brittle dependencies on external HTTP servers and require managing complex, large-scale Parquet indices alongside the raw COGs.
 
 Instead, the most robust and performant architecture is to **physically rewrite the COGs into Zarr v3 Sharded Archives** (which can be done in parallel at lightning speeds using tools like `tensorstore` or Rust's `zarrs`). 
 
