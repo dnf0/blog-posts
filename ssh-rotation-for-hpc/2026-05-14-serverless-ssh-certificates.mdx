@@ -7,7 +7,7 @@ description: "How I implemented a serverless SSH Certificate Authority using AWS
 *12 min read • Tags: `security`, `aws`, `serverless`, `ssh`, `hpc`*
 
 <Callout type="info">
-**TL;DR:** To satisfy organisational Single Sign-On (SSO) mandates without breaking developer workflows in remote IDEs like Cursor, I replaced traditional SSH public keys on our High-Performance Computing (HPC) cluster with short-lived (8-hour) SSH certificates. I implemented a serverless Certificate Authority (CA) using AWS Lambda and AWS Secrets Manager. This architectural shift reduced our server-side credential footprint from O(N) to O(1) and eliminated manual revocation overhead, all while maintaining seamless compatibility with native SSH tooling.
+**TL;DR:** To satisfy organisational Single Sign-On (SSO) mandates without breaking developer workflows in remote IDEs like Cursor, I replaced traditional SSH public keys on our High-Performance Computing (HPC) cluster with short-lived (8-hour) SSH certificates. I implemented a serverless Certificate Authority (CA) using AWS Lambda and AWS Secrets Manager. This architectural shift reduced our server-side credential footprint from managing per-user keys to a single CA key and eliminated manual revocation overhead, all while maintaining seamless compatibility with native SSH tooling.
 </Callout>
 
 When our organisation mandated Single Sign-On (SSO) for all infrastructure access, I faced an immediate architectural conflict with our High-Performance Computing (HPC) cluster. Historically, developer access to the `science-surge` cluster relied on traditional, permanent SSH public keys appended to `authorized_keys` files. This legacy approach fundamentally expects static credentials, directly contradicting the dynamic, verifiable authentication required by modern corporate security policies. 
@@ -53,7 +53,7 @@ To quantify the architectural improvements, I compared the legacy static key app
 | Metric | Legacy Static Keys | Serverless SSH CA |
 | :--- | :--- | :--- |
 | **Credential Lifetime** | Infinite | 8 Hours |
-| **Server Configuration Footprint** | O(N) Users | O(1) CA Key |
+| **Server Configuration Footprint** | Per-User Keys | Single CA Key |
 | **Issuance Latency** | N/A | ~400ms (Cold) / ~50ms (Warm) |
 | **Revocation Complexity** | High (Manual File Edits) | Zero (Auto-expires) |
 | **Auditability** | Limited (syslog) | High (AWS CloudWatch) |
