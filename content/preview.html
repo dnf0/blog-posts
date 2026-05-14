@@ -141,17 +141,16 @@ description: &quot;An empirical benchmark of architectural approaches for dynami
 <p>Once the data is structured as a native Zarr v3 archive, the requirement for backend Python-based tile servers is entirely eliminated. By hosting the Zarr archive on a static object storage service (e.g., Amazon S3) and coupling a WebAssembly (WASM)-powered Zarr decoder with MapLibre's Custom WebGL layers on the client frontend, the browser can dynamically fetch, decompress, and execute immediate GPU-accelerated client-side rendering.</p>
 <p>This architectural paradigm eradicates the VRT bottleneck, removes the dependency on computationally expensive backend tile servers, and achieves the theoretical minimum latency for interactive web mapping applications.</p>
 <h2>References</h2>
-<ul>
+<ol>
 <li><a href="https://gdal.org/">Geospatial Data Abstraction Library (GDAL)</a></li>
 <li><a href="https://www.cogeo.org/">Cloud Optimised GeoTIFF specification</a></li>
 <li><a href="https://stacspec.org/">SpatioTemporal Asset Catalogue (STAC)</a></li>
 <li><a href="https://zarr.dev/">Zarr Storage Format</a></li>
 <li><a href="https://lancedb.github.io/lance/">Lance Format</a></li>
 <li><a href="https://pytest-benchmark.readthedocs.io/">pytest-benchmark</a></li>
-<li><a href="https://developmentseed.org/titiler/">TiTiler</a></li>
-</ul>
+</ol>
 <hr />
-<p><em>Transparency Note: This blog post was written and structured with the assistance of an AI agent (Gemini).</em>*</p>
+<p><em>Transparency Note: This blog post was written and structured with the assistance of an AI agent (Gemini).</em></p>
 
 </body>
 </html>
