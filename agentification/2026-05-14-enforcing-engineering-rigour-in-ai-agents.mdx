@@ -1,0 +1,77 @@
+---
+title: "Enforcing Engineering Rigour in AI Agents"
+date: "2026-05-14"
+tags: ["ai-workflows", "orchestration", "developer-experience"]
+description: "How I curated a lean ecosystem to standardise AI workflows and enforce engineering rigour across the organisation."
+---
+
+# Enforcing Engineering Rigour in AI Agents
+
+*May 14, 2026 • 10 min read • Tags: `ai-workflows`, `orchestration`, `developer-experience`*
+
+<Callout type="info">
+**TL;DR:** Deploying raw AI models across an organisation leads to fragmented workflows and chaotic codebases. I curated a lean tooling stack—combining `agent-rules` for cross-provider standardisation, `@obra/superpowers` for stateful orchestration, and `@tanstack/intent` for dynamic skill discovery—to standardise developer experience without bloat and provide a foolproof onboarding path for non-engineers.
+</Callout>
+
+I was recently tasked at my current organisation with identifying a curated set of tooling to standardise our developer experience (DevEx) across AI-assisted workflows. The mandate was twofold: enforce engineering rigour without introducing heavy bureaucratic bloat, and provide a frictionless onboarding experience for non-engineering users venturing into terminal-based AI tooling like the Gemini CLI and Claude Code for the first time. 
+
+When I initially observed unguided AI agents operating within our codebases, they acted without context, discipline, or standard operating procedures. The results were wildly unpredictable. An agent might write a brilliant algorithm one moment and execute a destructive, unverified refactor the next. Unconstrained AI is an organisational liability, not an asset. To fix this, I introduced strict workflow orchestration—forcing these models to abandon their erratic autonomy and adopt systematic engineering rigour.
+
+## Table of Contents
+- [The Problem: Fragmented Ecosystems and Stateless Agents](#the-problem-fragmented-ecosystems-and-stateless-agents)
+- [Curating the Lean Stack](#curating-the-lean-stack)
+  - [Unification via agent-rules](#unification-via-agent-rules)
+  - [Orchestration via Superpowers](#orchestration-via-superpowers)
+  - [Dynamic Specialisation via Skills](#dynamic-specialisation-via-skills)
+- [Zero-to-Hero: Onboarding Non-Engineers](#zero-to-hero-onboarding-non-engineers)
+- [Conclusion: A Cohesive DevEx](#conclusion-a-cohesive-devex)
+- [References](#references)
+
+## The Problem: Fragmented Ecosystems and Stateless Agents
+
+My first observation was the severe fragmentation of the AI tooling ecosystem. Different teams were using a disparate array of IDEs and CLI tools—Cursor, Claude Code, and the Gemini CLI. Each tool required its own configuration schema, leading to massive context drift. An architectural rule established in `.cursorrules` was completely ignored by Claude. 
+
+Furthermore, I discovered a critical limitation in relying purely on system prompts: static rules are inherently stateless. I could write a mandate to "always write tests," but in the heat of a complex implementation, an agent would routinely skip verification if it hit a roadblock. I needed a mechanism to force the AI to empirically validate its assumptions before claiming a task was complete.
+
+## Curating the Lean Stack
+
+To solve this, I deliberately avoided heavy, monolithic platforms. Instead, I curated a subset of highly composable tools that, in combination, provided everything needed for a rigorous engineering organisation.
+
+### Unification via agent-rules
+
+To resolve the fragmentation problem, I deployed the `agent-rules` repository to act as the single source of truth. I authored our core engineering mandates in a universal `AGENTS.md` file. The tooling then dynamically compiled this master file into native formats tailored for each provider (e.g., `.cursorrules`, `CLAUDE.md`, `GEMINI.md`). 
+
+This cross-provider generation meant I only had to update a policy once. Regardless of whether an engineer was using Cursor in a Codespace or the Gemini CLI locally, the baseline rules of engagement were universally enforced. 
+
+### Orchestration via Superpowers
+
+Establishing static rules was insufficient; I needed to orchestrate the actual workflow. I integrated `@obra/superpowers` [1] to act as an orchestration layer. Superpowers overrides default agent behaviours by forcing them to follow step-by-step methodologies. 
+
+For instance, when a developer asks an agent to build a feature, the `writing-plans` skill forces the agent to stop, explore the repository, and write a test-driven development (TDD) plan before writing a single line of implementation code. By mandating processes like planning, TDD, and systematic debugging, I transformed erratic agents into disciplined, methodical engineers. The orchestrator ensures that agents cannot bypass critical verification steps.
+
+### Dynamic Specialisation via Skills
+
+With robust orchestration in place, I needed a way to inject domain-specific expertise without bloating the global context window. Dumping the documentation for every library we use into `AGENTS.md` was unscalable.
+
+I achieved this by arming our orchestrated workflows with specific expert tools, known as "skills." I bundled crucial internal skills—such as `graphify` for deep architectural mapping and `roborev-integration` for embedding the agent into a continuous code review loop—directly into the ecosystem. 
+
+Crucially, I utilised `@tanstack/intent` [2] to auto-discover library-specific skills dynamically from our `node_modules`. If a developer imports a specific data-fetching library, the agent automatically acquires the context, patterns, and best practices strictly for that library. This combination of orchestration and dynamic discovery provides a highly contextualized, bloat-free intelligence layer.
+
+## Zero-to-Hero: Onboarding Non-Engineers
+
+Architectural purity is functionally useless if it creates friction for adoption. My second mandate was to ensure that non-engineering users—product managers, technical writers, and analysts—could leverage these tools without needing a degree in computer science.
+
+I engineered "zero-to-hero" bootstrap scripts and prebuilt templates within the `agent-rules` ecosystem. With a single shell command, any user could inject this entire cognitive architecture into their local environment. 
+
+This democratisation was the final piece of the puzzle. Non-engineers did not need to understand the intricacies of stateful orchestration, cross-provider generation, or TDD. They simply ran the bootstrap script and immediately inherited a disciplined, highly capable AI assistant that was pre-configured to adhere to the organisation's rigorous standards.
+
+## Conclusion: A Cohesive DevEx
+
+By strictly curating a lean stack—`agent-rules` for standardisation, Superpowers for orchestration, and dynamic skills for expertise—I was able to standardise the developer experience across our entire organisation without introducing unnecessary bloat. I learned that the future of AI engineering is not defined solely by the raw intelligence of the underlying models, but by the disciplined workflows and context management we wrap around them.
+
+## References
+
+1. [Superpowers GitHub Repository](https://github.com/obra/superpowers) - The core orchestration engine for stateful AI workflows.
+2. [TanStack Intent](https://github.com/TanStack/intent) - Dynamic skill discovery and integration mechanism.
+
+*Transparency Note: This blog post was written and structured with the assistance of an AI agent (Gemini).*
