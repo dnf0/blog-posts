@@ -11,7 +11,7 @@ These instructions govern the creation, formatting, and stylistic conventions fo
 Every blog post must strictly adhere to the following structural order to ensure consistency across the publication:
 
 1. **Frontmatter:** YAML frontmatter containing `title`, `date`, `tags`, and `description`.
-2. **Metadata Line:** An italicised line detailing date, read time, and code-formatted tags (e.g., `*May 12, 2026 • 6 min read • Tags: \`geospatial\`, \`python\`*`).
+2. **Metadata Line:** An italicised line detailing read time and code-formatted tags (e.g., `*6 min read • Tags: \`geospatial\`, \`python\`*`).
 3. **TL;DR Callout:** A `<Callout type="info">` block starting with `**TL;DR:**` summarising the findings.
 4. **Introduction / Problem Statement:** The opening narrative paragraphs (without an H2 header).
 5. **Table of Contents:** An auto-generated list of links to all subsequent sections.

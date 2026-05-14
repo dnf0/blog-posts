@@ -6,7 +6,7 @@ description: "An empirical benchmark of architectural approaches for dynamically
 ---
 
 
-*May 12, 2026 • 6 min read • Tags: `geospatial`, `python`, `zarr`, `benchmarking`, `rasterio`, `data-engineering`*
+*6 min read • Tags: `geospatial`, `python`, `zarr`, `benchmarking`, `rasterio`, `data-engineering`*
 
 <Callout type="info">
 **TL;DR:** Global VRTs fail at scale due to the computational overhead of XML parsing. For production systems supporting high-concurrency geospatial queries, physically converting the data to **Zarr v3 Sharded Archives** or using modern columnar formats like **Lance** yields sub-millisecond retrieval latencies.
