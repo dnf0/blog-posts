@@ -12,7 +12,7 @@ Data Engineers and Platform Architects building highly concurrent, serverless ge
 *   **The Reality:** The production requirement is a global 30m dataset over land, characterized by long run-lengths (smooth climate/hazard data).
 *   **The Dimensionality:** The data is hyper-dimensional: 12 years × 4 scenarios × 5 return periods × 3 percentiles = 720 distinct layers per spatial pixel.
 *   **The Constraint:** The API must execute synchronous, low-latency extractions for batches of up to 100,000 irregular polygons.
-*   **The Proxy Benchmark:** To empirically test architectures, we use a 6°×6° Copernicus DEM (1.7GB, ~466M pixels) quantized to `q2500`. This perfectly simulates the smooth, blocky nature of the global hazard data while allowing rigorous, reproducible micro-benchmarking.
+*   **The Proxy Benchmark:** To empirically test architectures, we use a 6°×6° Copernicus DEM (1.7GB, ~466M pixels) quantised to `q2500`. This perfectly simulates the smooth, blocky nature of the global hazard data while allowing rigorous, reproducible micro-benchmarking.
 
 ### 2. The Baseline: Sequential Raster Masking
 *   **The Approach:** Standard GDAL/Rasterio pipeline against a Cloud Optimized GeoTIFF (COG).

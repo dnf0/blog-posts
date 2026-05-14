@@ -35,7 +35,7 @@ description: "Benchmarking the architectural evolution required to synchronously
 
 **The Constraint:** The API must execute synchronous, low-latency extractions for batches of up to 100,000 irregular polygons.
 
-**The Proxy Benchmark:** To empirically test architectures, we use a 6°×6° Copernicus DEM (1.7GB, ~466M pixels) quantized to `q2500`. This perfectly simulates the smooth, blocky nature of the global hazard data while allowing rigorous, reproducible micro-benchmarking.
+**The Proxy Benchmark:** To empirically test architectures, we use a 6°×6° Copernicus DEM (1.7GB, ~466M pixels) quantised to `q2500`. This perfectly simulates the smooth, blocky nature of the global hazard data while allowing rigorous, reproducible micro-benchmarking.
 
 <Callout type="info">
 **TL;DR:** For massive batch extraction of 100K+ polygons, a pure-Rust backend querying sharded N-dimensional Zarr arrays provides the optimal balance of storage compression, analytical accuracy, and sub-second synchronous API performance.
