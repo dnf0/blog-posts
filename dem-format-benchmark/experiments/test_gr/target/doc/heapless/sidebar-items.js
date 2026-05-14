@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"mod":["binary_heap","consts","i","mpmc","pool","spsc"],"struct":["HistoryBuffer","IndexMap","IndexSet","LinearMap","String","Vec"],"trait":["ArrayLength","PowerOfTwo"],"type":["FnvIndexMap","FnvIndexSet"]};

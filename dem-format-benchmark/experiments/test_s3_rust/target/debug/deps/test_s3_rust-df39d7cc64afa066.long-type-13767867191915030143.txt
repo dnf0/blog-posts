@@ -1,4 +1,0 @@
-AsyncObjectStore<object_store::aws::AmazonS3>
-AsyncObjectStore<object_store::aws::AmazonS3>: ReadableStorageTraits
-AsyncToSyncStorageAdapter<TStorage, TBlockOn>
-PerformanceMetricsStorageAdapter<TStorage>

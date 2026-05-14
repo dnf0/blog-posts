@@ -1,9 +1,0 @@
-(function() {
-    const implementors = Object.fromEntries([["hash32",[]],["heapless",[["impl&lt;N&gt; <a class=\"trait\" href=\"hash32/trait.Hash.html\" title=\"trait hash32::Hash\">Hash</a> for <a class=\"struct\" href=\"heapless/struct.String.html\" title=\"struct heapless::String\">String</a>&lt;N&gt;<div class=\"where\">where\n    N: <a class=\"trait\" href=\"heapless/trait.ArrayLength.html\" title=\"trait heapless::ArrayLength\">ArrayLength</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/1.95.0/core/primitive.u8.html\">u8</a>&gt;,</div>",0],["impl&lt;T, N&gt; <a class=\"trait\" href=\"hash32/trait.Hash.html\" title=\"trait hash32::Hash\">Hash</a> for <a class=\"struct\" href=\"heapless/struct.Vec.html\" title=\"struct heapless::Vec\">Vec</a>&lt;T, N&gt;<div class=\"where\">where\n    T: <a class=\"trait\" href=\"hash32/trait.Hash.html\" title=\"trait hash32::Hash\">Hash</a>,\n    N: <a class=\"trait\" href=\"heapless/trait.ArrayLength.html\" title=\"trait heapless::ArrayLength\">ArrayLength</a>&lt;T&gt;,</div>",0],["impl&lt;T, N, U, C&gt; <a class=\"trait\" href=\"hash32/trait.Hash.html\" title=\"trait hash32::Hash\">Hash</a> for <a class=\"struct\" href=\"heapless/spsc/struct.Queue.html\" title=\"struct heapless::spsc::Queue\">Queue</a>&lt;T, N, U, C&gt;<div class=\"where\">where\n    N: <a class=\"trait\" href=\"heapless/trait.ArrayLength.html\" title=\"trait heapless::ArrayLength\">ArrayLength</a>&lt;T&gt;,\n    T: <a class=\"trait\" href=\"hash32/trait.Hash.html\" title=\"trait hash32::Hash\">Hash</a>,\n    U: Uxx,\n    C: XCore,</div>",0]]]]);
-    if (window.register_implementors) {
-        window.register_implementors(implementors);
-    } else {
-        window.pending_implementors = implementors;
-    }
-})()
-//{"start":59,"fragment_lengths":[13,1519]}
