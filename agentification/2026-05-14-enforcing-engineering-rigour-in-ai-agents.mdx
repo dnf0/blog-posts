@@ -45,7 +45,7 @@ This cross-provider generation meant I only had to update a policy once. Regardl
 
 ### Orchestration via Superpowers
 
-Establishing static rules was insufficient; I needed to orchestrate the actual workflow. I integrated `@obra/superpowers` [1] to act as an orchestration layer. Superpowers overrides default agent behaviours by forcing them to follow step-by-step methodologies. 
+Establishing static rules was insufficient; I needed to orchestrate the actual workflow. I integrated `@obra/superpowers` [[1]](#references) to act as an orchestration layer. Superpowers overrides default agent behaviours by forcing them to follow step-by-step methodologies. 
 
 For instance, when a developer asks an agent to build a feature, the `writing-plans` skill forces the agent to stop, explore the repository, and write a test-driven development (TDD) plan before writing a single line of implementation code. By mandating processes like planning, TDD, and systematic debugging, I transformed erratic agents into disciplined, methodical engineers. The orchestrator ensures that agents cannot bypass critical verification steps.
 
@@ -53,9 +53,9 @@ For instance, when a developer asks an agent to build a feature, the `writing-pl
 
 With robust orchestration in place, I needed a way to inject domain-specific expertise without bloating the global context window. Dumping the documentation for every library we use into `AGENTS.md` was unscalable.
 
-I achieved this by arming our orchestrated workflows with specific expert tools, known as "skills." I bundled crucial internal skills—such as `graphify` for deep architectural mapping and `roborev-integration` for embedding the agent into a continuous code review loop—directly into the ecosystem. 
+I achieved this by arming our orchestrated workflows with specific expert tools, known as "skills." I bundled crucial internal capabilities directly into the ecosystem, specifically `graphify` and `roborev-integration`. 
 
-Crucially, I utilised `@tanstack/intent` [2] to auto-discover library-specific skills dynamically from our `node_modules`. If a developer imports a specific data-fetching library, the agent automatically acquires the context, patterns, and best practices strictly for that library. This combination of orchestration and dynamic discovery provides a highly contextualized, bloat-free intelligence layer.
+These two skills are not just arbitrary add-ons; they are fundamentally complementary to our overarching orchestration strategy. `graphify` forces the agent to map the architectural dependencies of an entire codebase into a clustered knowledge graph before making any structural changes, completely eliminating the "blind refactoring" problem. Following implementation, `roborev-integration` locks the agent into a strict, continuous code review loop, ensuring every line of code is rigorously validated against the original specification before the developer ever reviews a pull request. Together, they form an airtight engineering loop: `graphify` ensures the AI understands the system before it builds, and `roborev` ensures it proves its work before it merges. This approach delivers a highly contextualised, bloat-free intelligence layer that prioritises empirical verification over raw velocity.
 
 ## Zero-to-Hero: Onboarding Non-Engineers
 
@@ -72,6 +72,5 @@ By strictly curating a lean stack—`agent-rules` for standardisation, Superpowe
 ## References
 
 1. [Superpowers GitHub Repository](https://github.com/obra/superpowers) - The core orchestration engine for stateful AI workflows.
-2. [TanStack Intent](https://github.com/TanStack/intent) - Dynamic skill discovery and integration mechanism.
 
 *Transparency Note: This blog post was written and structured with the assistance of an AI agent (Gemini).*
