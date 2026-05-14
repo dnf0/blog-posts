@@ -5,7 +5,7 @@ tags: [geospatial, python, zarr, benchmarking, rasterio]
 description: "An empirical benchmark of architectural approaches for dynamically querying extensive collections of Cloud Optimised GeoTIFFs (COGs)."
 ---
 
-# Why Global VRTs Fail at Scale (Evaluating 6 Alternative Architectures)
+# Why Global VRTs Fail at Scale (Evaluating 5 Alternative Architectures)
 
 *May 12, 2026 • 6 min read • Tags: `geospatial`, `python`, `zarr`, `benchmarking`, `rasterio`, `data-engineering`*
 
@@ -35,22 +35,20 @@ To ensure reproducibility and transparency, it is critical to define the constra
 
 *   **Hardware:** Apple MacBook M4, 12 cores, 24 GB RAM.
 *   **Storage:** Local NVMe SSD.
-*   **Concurrency Model:** All benchmarks were executed synchronously using standard single-threaded Python scripts inside the `pytest-benchmark` harness. This strictly isolates the performance overhead of the data access layer (XML parsing, JSON index reading, Arrow column retrieval, or HTTP network requests) without confounding the results with parallelisation strategies or multi-processing frameworks. The STAC/TiTiler benchmark used a background thread to mock the FastAPI server, but the client requests remained strictly sequential.
+*   **Concurrency Model:** All benchmarks were executed synchronously using standard single-threaded Python scripts inside the `pytest-benchmark` harness. This strictly isolates the performance overhead of the data access layer (XML parsing, JSON index reading, Arrow column retrieval, or HTTP network requests) without confounding the results with parallelisation strategies or multi-processing frameworks.
 
 ## Methodology: Evaluated Architectures
 
-Given the scalability limitations of Global VRTs, it is necessary to evaluate more efficient query paradigms for large COG collections. I benchmarked six alternative architectures against the baseline Global VRT:
+Given the scalability limitations of Global VRTs, it is necessary to evaluate more efficient query paradigms for large COG collections. I benchmarked five alternative architectures against the baseline Global VRT:
 
 1. **Local VRTs (Dynamic):** Instead of one giant VRT, I use a lightweight spatial index (like GeoParquet) to find intersecting COGs, and dynamically build a tiny, temporary VRT on disk at query time.
 2. **GeoParquet Direct Reads:** Similar to Local VRTs, but I skip the VRT entirely. I find the intersecting COGs using GeoParquet, open them directly with `rasterio`, and use `rasterio.merge` to mosaic them in memory.
 3. **Kerchunk (Virtual Zarr):** I extract the byte-offsets of the compressed TIFF chunks and store them in a lightweight JSON index. Clients read this index using `fsspec`'s `ReferenceFileSystem` and `xarray/zarr`, treating the original COGs as a single Zarr array without moving any data.
 4. **Lance Format:** A contemporary columnar format designed for ML and multimodal data. The TIFF data is extracted into `FixedSizeListArrays` alongside [Well-Known Binary (WKB)](https://en.wikipedia.org/wiki/Well-known_text_representation_of_geometry) geometries. Lance facilitates $O(1)$ random access, thereby circumventing the requirement to decompress entire row groups.
 5. **Zarr v3 (Physical):** The source COGs are physically transformed and written into a native, chunked **Zarr v3 Sharded Archive**. 
-6. **STAC + TiTiler:** A dynamic map server backend (TiTiler) coupled with a SpatioTemporal Asset Catalogue (STAC) is used. This configuration simulates the network and computational overhead inherent in requesting a dynamic mosaic via an API.
-
 ## The Benchmark: Wall-Clock Retrieval
 
-I built a Python harness using `pytest-benchmark` to test these 7 architectures. The task: retrieve a spatial slice intersecting 4 mock COGs out of a grid.
+I built a Python harness using `pytest-benchmark` to test these 6 architectures. The task: retrieve a spatial slice intersecting 4 mock COGs out of a grid.
 
 Here are the empirical wall-clock results running my Python harness (see Table 1):
 
@@ -108,14 +106,6 @@ Here are the empirical wall-clock results running my Python harness (see Table 1
       <td style={{ textAlign: 'right', padding: '8px' }}>239.71</td>
       <td style={{ textAlign: 'right', padding: '8px' }}>101</td>
     </tr>
-    <tr style={{ borderBottom: '1px solid #eaecef' }}>
-      <td style={{ padding: '8px' }}><strong>TiTiler (STAC)</strong></td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>53447.75</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>59086.58</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>56802.77</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>1504.13</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>17</td>
-    </tr>
     <tr>
       <td style={{ padding: '8px' }}><strong>Local VRT</strong></td>
       <td style={{ textAlign: 'right', padding: '8px' }}>94853.63</td>
@@ -133,8 +123,7 @@ While the table above provides a baseline, there are four critical caveats to th
 
 1. **The Scale Disconnect:** The benchmark evaluates a **micro-scale scenario** (a grid of 100 COGs). At this scale, the Global VRT parses in ~2.5ms (see Table 1), which looks acceptable. However, VRT parsing degrades non-linearly; a 2GB XML file for 10 million COGs would cause this number to spike into the seconds or cause an outright crash, whereas Zarr and Lance remain $O(1)$.
 2. **The Network Mirage:** These tests ran on a **local NVMe SSD**. In a real cloud environment (S3), network latency dominates. A VRT or `rasterio.merge` approach requires multiple sequential HTTP GET requests to read TIFF headers before touching data. Over a network, the gap between Kerchunk/Zarr (a single targeted byte-range request) and VRTs would expand by orders of magnitude.
-3. **The TiTiler Mock:** The STAC/TiTiler result (~56ms, see Table 1) is a **mocked baseline**. It simulates an average network round-trip and server latency (`time.sleep(0.05)`), rather than an empirical benchmark of TiTiler's internal raster engine, to illustrate the inherent overhead of relying on dynamic tile servers.
-4. **The Local VRT Penalty:** Why is Local VRT (~95ms, see Table 1) so much slower than GeoParquet Direct (~7ms, see Table 1) when they both use the same index? The substantial penalty comes entirely from the overhead of spawning the `gdalbuildvrt` subprocess and performing physical I/O to a temporary disk file.
+3. **The Local VRT Penalty:** Why is Local VRT (~95ms, see Table 1) so much slower than GeoParquet Direct (~7ms, see Table 1) when they both use the same index? The substantial penalty comes entirely from the overhead of spawning the `gdalbuildvrt` subprocess and performing physical I/O to a temporary disk file.
 
 Despite the artificial advantages provided by local hardware, the architectural conclusions remain valid:
 
