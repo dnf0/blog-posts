@@ -24,6 +24,7 @@ Every blog post MUST strictly adhere to the following structural order at the to
 
 ## 3. Empirical Rigour & Anchoring
 *   **Anchor Every Metric:** Every claim, file size (e.g., "1.7 MB"), and latency metric (e.g., "0.24 seconds") MUST be explicitly anchored to a visual reference. Always append `(see Figure X)` or `(see Table Y)` immediately after the data point.
+*   **Inline Academic Referencing:** References MUST be cited inline throughout the text using bracketed numbers (e.g., `[1]`). Do not list references at the bottom without explicitly citing them in the body of the text where the concept is introduced.
 *   **Exact Dimensionality:** Be precise about scale. If a dataset has *over* 700 layers, say "over 700 distinct layers," not exactly 700.
 *   **Avoid Theoretical Absolutes:** If a behavior is a theoretical consequence of an architecture rather than an empirically measured fact in the benchmark, explicitly state that it "would theoretically" behave that way.
 

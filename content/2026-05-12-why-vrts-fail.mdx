@@ -144,7 +144,7 @@ Despite the artificial advantages provided by local hardware, the architectural 
 
 ## Conclusion: Optimal Architecture Selection
 
-Following a comprehensive assessment of both empirical performance and operational overhead, a definitive optimal architecture emerges for high-concurrency production environments. Although "virtual" zero-copy references (e.g., Kerchunk or VirtualiZarr) demonstrate exceptional performance in localised benchmarks, they introduce substantial fragility in production systems. Because the virtual index is structurally decoupled from the physical data, any modification, relocation, or overwrite of the underlying source COG causes the hardcoded byte-offsets within the Kerchunk index to point to misaligned or invalid data. Furthermore, this approach necessitates the ongoing operational management of complex, large-scale Parquet or JSON indices parallel to the raw COG assets.
+Following a comprehensive assessment of both empirical performance and operational overhead, a definitive optimal architecture emerges for high-concurrency production environments. Although "virtual" zero-copy references (e.g., Kerchunk or VirtualiZarr) demonstrate exceptional performance in localised benchmarks, they introduce substantial fragility in production systems. Because the virtual index is structurally decoupled from the physical data, any modification, relocation, or overwrite of the underlying source COG causes the hardcoded byte-offsets within the Kerchunk index to point to misaligned or invalid data. Furthermore, virtual references merely translate the metadata bottleneck rather than eliminating it. At the scale of millions of COGs, the resulting JSON or Parquet index becomes a massive dependency, and because the files are not physically consolidated, the architecture remains constrained by the latency overhead of executing millions of distinct S3 object reads.
 
 Conversely, the most robust and performant architectural strategy is the **physical transformation of the COGs into native Zarr v3 Sharded Archives**. This conversion process can be parallelised to achieve high throughput using libraries such as `tensorstore` or the Rust-based `zarrs`.
 
@@ -163,4 +163,4 @@ This architectural paradigm eradicates the VRT bottleneck, removes the dependenc
 - [TiTiler](https://developmentseed.org/titiler/)
 
 ---
-*Transparency Note: This blog post was written and structured with the assistance of an AI agent (Gemini).*
+*Transparency Note: This blog post was written and structured with the assistance of an AI agent (Gemini).**
