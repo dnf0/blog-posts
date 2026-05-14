@@ -123,13 +123,13 @@ While the table above provides a baseline, there are four critical caveats to th
 
 1. **The Scale Disconnect:** The benchmark evaluates a **micro-scale scenario** (a grid of 100 COGs). At this scale, the Global VRT parses in ~2.5ms (see Table 1), which looks acceptable. However, VRT parsing degrades non-linearly; a 2GB XML file for 10 million COGs would cause this number to spike into the seconds or cause an outright crash, whereas Zarr and Lance remain $O(1)$.
 2. **The Network Mirage:** These tests ran on a **local NVMe SSD**. In a real cloud environment (S3), network latency dominates. A VRT or `rasterio.merge` approach requires multiple sequential HTTP GET requests to read TIFF headers before touching data. Over a network, the gap between Kerchunk/Zarr (a single targeted byte-range request) and VRTs would expand by orders of magnitude.
-3. **The Local VRT Penalty:** Why is Local VRT (~95ms, see Table 1) so much slower than GeoParquet Direct (~7ms, see Table 1) when they both use the same index? The substantial penalty comes entirely from the overhead of spawning the `gdalbuildvrt` subprocess and performing physical I/O to a temporary disk file.
+3. **The Local VRT Penalty:** Why is Local VRT (~95ms, see Table 1) so much slower than GeoParquet Direct (~7ms, see Table 1) when they both use the same index? The substantial penalty observed here stems from a naive implementation that spawns a `gdalbuildvrt` subprocess and performs physical disk I/O. While implementing this via native in-memory Python bindings (e.g., `rasterio.vrt`) would eliminate the subprocess overhead, the fundamental computational cost of dynamically parsing and constructing XML structures at runtime still inherently trails $O(1)$ columnar reads.
 
 Despite the artificial advantages provided by local hardware, the architectural conclusions remain valid:
 
 - **Optimal Architectures (Kerchunk & Zarr):** Both the virtual and physical Zarr implementations circumvent the overhead associated with XML parsing and dynamic mosaicking. They execute targeted retrieval of the precise compressed bytes required.
 - **Unexpected Performance of Lance:** The $O(1)$ random access capability of the Lance format yields highly competitive latencies (~1.1ms). It matches the performance profile of pure N-dimensional arrays while maintaining the structural flexibility of a tabular format.
-- **Underperforming Architecture (Local VRT):** The dynamic generation of XML via a subprocess and the subsequent physical I/O to a temporary disk file incurs a latency penalty of nearly 100ms. While this approach is memory-safe, it is highly detrimental to response times.
+- **Underperforming Architecture (Local VRT):** The dynamic generation of XML via a naive subprocess and the subsequent physical I/O to a temporary disk file incurs a latency penalty of nearly 100ms. While this approach is memory-safe, the fundamental cost of constructing XML structures is detrimental to response times.
 
 ## Conclusion: Optimal Architecture Selection
 
