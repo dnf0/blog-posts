@@ -7,7 +7,13 @@ dem_format_benchmark.egg-info/requires.txt
 dem_format_benchmark.egg-info/top_level.txt
 scripts/__init__.py
 scripts/benchmark.py
+scripts/crossover_analysis.py
 scripts/data_prep.py
 scripts/generate_post.py
+scripts/hilbert_plugin.py
+scripts/plot_quantized.py
+scripts/s2_plugin.py
+scripts/scaling_assessment.py
+scripts/validate_parity.py
 scripts/visualize.py
 tests/test_data_prep_streaming.py

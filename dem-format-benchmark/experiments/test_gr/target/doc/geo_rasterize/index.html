@@ -1,0 +1,308 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="geo-rasterize: a pure-rust 2D rasterizer for geospatial applications"><title>geo_rasterize - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="geo_rasterize" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0 (59807616e 2026-04-14)" data-channel="1.95.0" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate geo_rasterize</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../geo_rasterize/index.html">geo_<wbr>rasterize</a><span class="version">0.1.2</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#geo-rasterize-a-pure-rust-2d-rasterizer-for-geospatial-applications" title="geo-rasterize: a pure-rust 2D rasterizer for geospatial applications">geo-rasterize: a pure-rust 2D rasterizer for geospatial applications</a><ul><li><a href="#motivation-satellite-imagery-data-analysis" title="Motivation: satellite imagery data analysis">Motivation: satellite imagery data analysis</a></li><li><a href="#binary-rasterization" title="Binary rasterization">Binary rasterization</a></li><li><a href="#with-multiple-shapes" title="…with multiple shapes">…with multiple shapes</a></li><li><a href="#labeling-non-binary-rasterization" title="Labeling (non-binary rasterization)">Labeling (non-binary rasterization)</a></li><li><a href="#heatmaps" title="Heatmaps">Heatmaps</a></li><li><a href="#geographic-transforms" title="Geographic transforms">Geographic transforms</a></li><li><a href="#performance" title="Performance">Performance</a></li><li><a href="#why-not-gdal" title="Why not GDAL?">Why not GDAL?</a></li><li><a href="#alternative-crates" title="Alternative crates">Alternative crates</a></li><li><a href="#contributing" title="Contributing">Contributing</a></li><li><a href="#license" title="License">License</a></li></ul></li></ul><h3><a href="#structs">Crate Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#types" title="Type Aliases">Type Aliases</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>geo_<wbr>rasterize</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/geo_rasterize/lib.rs.html#1-657">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="geo-rasterize-a-pure-rust-2d-rasterizer-for-geospatial-applications"><a class="doc-anchor" href="#geo-rasterize-a-pure-rust-2d-rasterizer-for-geospatial-applications">§</a>geo-rasterize: a pure-rust 2D rasterizer for geospatial applications</h2>
+<p><a href="https://crates.io/crates/geo-rasterize"><img src="https://img.shields.io/crates/v/geo-rasterize.svg" alt="Crates.io" /></a>
+<a href="https://docs.rs/geo-rasterize/latest/geo_rasterize/"><img src="https://img.shields.io/docsrs/geo-rasterize" alt="Docs.rs" /></a>
+<a href="https://app.codecov.io/gh/msalib/geo-rasterize/"><img src="https://img.shields.io/codecov/c/github/msalib/geo-rasterize" alt="CodeCov.io" /></a>
+<a href="https://github.com/msalib/geo-rasterize/actions?query=CI+branch%3Amain"><img src="https://github.com/msalib/geo-rasterize/actions/workflows/CI.yml/badge.svg" alt="Build Status" /></a>
+<a href="https://pypi.org/project/geo-rasterize/"><img src="https://img.shields.io/pypi/v/geo-rasterize?style=plastic" alt="Python wrapper" /></a></p>
+<p>This crate is intended for folks who have some vector data (like a
+<code>geo::Polygon</code>) and a raster source (like a GeoTiff perhaps opened
+with <code>GDAL</code>) and who want to generate a boolean array representing
+which bits of raster are filled in by the polygon. There’s also a
+<a href="https://pypi.org/project/geo-rasterize/">Python wrapper</a> available.</p>
+<p>This implementation is based on <code>GDAL</code>’s <code>GDALRasterizeGeometries</code> and
+allows you to rasterize any type supported by the <code>geo-types</code> package,
+including:</p>
+<ul>
+<li><a href="../geo_types/geometry/point/struct.Point.html" title="struct geo_types::geometry::point::Point">Point</a></li>
+<li><a href="../geo_types/geometry/line/struct.Line.html" title="struct geo_types::geometry::line::Line">Line</a></li>
+<li><a href="../geo_types/geometry/line_string/struct.LineString.html" title="struct geo_types::geometry::line_string::LineString">LineString</a></li>
+<li><a href="../geo_types/geometry/polygon/struct.Polygon.html" title="struct geo_types::geometry::polygon::Polygon">Polygon</a></li>
+<li><a href="../geo_types/geometry/rect/struct.Rect.html" title="struct geo_types::geometry::rect::Rect">Rect</a> and <a href="../geo_types/geometry/triangle/struct.Triangle.html" title="struct geo_types::geometry::triangle::Triangle">Triangle</a></li>
+<li><a href="../geo_types/geometry/multi_point/struct.MultiPoint.html" title="struct geo_types::geometry::multi_point::MultiPoint">MultiPoint</a>, <a href="../geo_types/geometry/multi_line_string/struct.MultiLineString.html" title="struct geo_types::geometry::multi_line_string::MultiLineString">MultiLineString</a>, and <a href="../geo_types/geometry/multi_polygon/struct.MultiPolygon.html" title="struct geo_types::geometry::multi_polygon::MultiPolygon">MultiPolygon</a></li>
+<li><a href="../geo_types/geometry/enum.Geometry.html" title="enum geo_types::geometry::Geometry">Geometry</a> and <a href="../geo_types/geometry/geometry_collection/struct.GeometryCollection.html" title="struct geo_types::geometry::geometry_collection::GeometryCollection">GeometryCollection</a></li>
+</ul>
+<p>Those shapes can have any coordintes with any numeric type as long as
+it can be converted into <code>f64</code>.</p>
+<p>This crate matches GDAL’s behavior when GDAL is supplied with the
+<code>ALL_TOUCHED=TRUE</code> option. So you can use it as a drop-in replacement
+for GDAL if you only need a GDAL-compatible rasterizer. Also, there’s
+no support for GDAL’s <code>BURN_VALUE_FROM=Z</code>. But otherwise, this code
+should produce identical results to GDAL’s rasterizer – the
+rasterization algorithm is a direct port. We use
+<a href="https://crates.io/crates/proptest">proptest</a> to perform randomized
+differential comparisons with GDAL in order bolster confidence about
+our conformance.</p>
+<!-- there are different conventions for representing
+image data in an array....image matrices are stored in blah blah order
+-->
+<h3 id="motivation-satellite-imagery-data-analysis"><a class="doc-anchor" href="#motivation-satellite-imagery-data-analysis">§</a>Motivation: satellite imagery data analysis</h3>
+<p>Let’s say you’re interested in the free 10m resolution data from ESA’s
+<a href="https://www.esa.int/Applications/Observing_the_Earth/Copernicus/Sentinel-2">Sentinel-2</a>
+satellite mission. You might be especially interested in how farms
+change over time, and you’ve got a bunch of farms represented as
+polygons. You fetch some Sentinel-2 data from
+<a href="https://registry.opendata.aws/sentinel-2-l2a-cogs/">AWS</a>. Since
+Sentinel-2 tiles are so large (over 110 million pixels!) and since
+they’re stored as <a href="https://www.cogeo.org/">Cloud Optimized GeoTiffs</a>,
+you convert your polygons into windows, and extract those windows from
+the image tiles; that way you only have to download the pixels that
+you care about.</p>
+<p>But now you have a problem! Your polygons are not perfect rectangles
+axis-aligned to the Sentinel-2 tiling system. So while you have small
+field chips, you don’t know which parts of those chips correspond to
+your polygons. Even worse, some of your polygons have holes (for
+example, to represent houses or ponds on the farms). That’s where a
+[geo-rasterize] comes in! Using [geo-rasterize], you can convert your
+field polygons into a binary raster just like your Sentinel-2 field
+chips. And you can use those mask chips to select which pixels of the
+Sentinel-2 chips you care about. Filtering on the masks, you can now
+generate time series for imagery, secure in the knowledge that you’re
+only examining pixels within your polygons!</p>
+<h3 id="binary-rasterization"><a class="doc-anchor" href="#binary-rasterization">§</a>Binary rasterization</h3>
+<p>Let’s say you want to rasterize a polygon into a grid 4 pixels wide by
+5 pixels high. To that, you simply construct a <a href="struct.BinaryRasterizer.html" title="struct geo_rasterize::BinaryRasterizer">BinaryRasterizer</a>
+using <a href="struct.BinaryBuilder.html" title="struct geo_rasterize::BinaryBuilder">BinaryBuilder</a>, call <a href="struct.BinaryRasterizer.html#method.rasterize" title="method geo_rasterize::BinaryRasterizer::rasterize">rasterize</a>
+with your polygon and call <a href="struct.BinaryRasterizer.html#method.finish" title="method geo_rasterize::BinaryRasterizer::finish">finish</a> to get
+an <a href="../ndarray/aliases/type.Array2.html" title="type ndarray::aliases::Array2">Array2<bool></a> of booleans.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>geo::polygon;
+<span class="kw">use </span>ndarray::array;
+<span class="kw">use </span>geo_rasterize::BinaryBuilder;
+
+<span class="kw">let </span>poly = <span class="macro">polygon!</span>[
+    (x:<span class="number">4</span>, y:<span class="number">2</span>),
+    (x:<span class="number">2</span>, y:<span class="number">0</span>),
+    (x:<span class="number">0</span>, y:<span class="number">2</span>),
+    (x:<span class="number">2</span>, y:<span class="number">4</span>),
+    (x:<span class="number">4</span>, y:<span class="number">2</span>),
+];
+
+<span class="kw">let </span><span class="kw-2">mut </span>r = BinaryBuilder::new().width(<span class="number">4</span>).height(<span class="number">5</span>).build()<span class="question-mark">?</span>;
+r.rasterize(<span class="kw-2">&amp;</span>poly)<span class="question-mark">?</span>;
+<span class="kw">let </span>pixels = r.finish();
+
+<span class="macro">assert_eq!</span>(
+    pixels.mapv(|v| v <span class="kw">as </span>u8),
+    <span class="macro">array!</span>[
+        [<span class="number">0</span>, <span class="number">1</span>, <span class="number">1</span>, <span class="number">0</span>],
+        [<span class="number">1</span>, <span class="number">1</span>, <span class="number">1</span>, <span class="number">1</span>],
+        [<span class="number">1</span>, <span class="number">1</span>, <span class="number">1</span>, <span class="number">1</span>],
+        [<span class="number">0</span>, <span class="number">1</span>, <span class="number">1</span>, <span class="number">1</span>],
+        [<span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>]
+    ]
+);
+</code></pre></div><h3 id="with-multiple-shapes"><a class="doc-anchor" href="#with-multiple-shapes">§</a>…with multiple shapes</h3>
+<p>But what if you want to rasterize several geometries? That’s easy enough!</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>geo::{Geometry, Line, Point};
+<span class="kw">use </span>ndarray::array;
+<span class="kw">use </span>geo_rasterize::BinaryBuilder;
+
+<span class="kw">let </span>shapes: Vec&lt;Geometry&lt;i32&gt;&gt; =
+    <span class="macro">vec!</span>[Point::new(<span class="number">3</span>, <span class="number">4</span>).into(),
+	     Line::new((<span class="number">0</span>, <span class="number">3</span>), (<span class="number">3</span>, <span class="number">0</span>)).into()];
+
+<span class="kw">let </span><span class="kw-2">mut </span>r = BinaryBuilder::new().width(<span class="number">4</span>).height(<span class="number">5</span>).build()<span class="question-mark">?</span>;
+<span class="kw">for </span>shape <span class="kw">in </span>shapes {
+    r.rasterize(<span class="kw-2">&amp;</span>shape)<span class="question-mark">?</span>;
+}
+
+<span class="kw">let </span>pixels = r.finish();
+<span class="macro">assert_eq!</span>(
+    pixels.mapv(|v| v <span class="kw">as </span>u8),
+    <span class="macro">array!</span>[
+        [<span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>],
+        [<span class="number">0</span>, <span class="number">1</span>, <span class="number">1</span>, <span class="number">0</span>],
+        [<span class="number">1</span>, <span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>],
+        [<span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>],
+        [<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>]
+    ]
+);</code></pre></div><h3 id="labeling-non-binary-rasterization"><a class="doc-anchor" href="#labeling-non-binary-rasterization">§</a>Labeling (non-binary rasterization)</h3>
+<p>So far we’ve been generating binary arrays; what if you want to
+rasterize different shapes to the same integer array, storing a
+different value corresponding to each shape for each pixel? For that,
+we have <a href="struct.Rasterizer.html" title="struct geo_rasterize::Rasterizer">Rasterizer</a> which we construct using
+<a href="struct.LabelBuilder.html" title="struct geo_rasterize::LabelBuilder">LabelBuilder</a>. When you burn a shape with <a href="struct.Rasterizer.html" title="struct geo_rasterize::Rasterizer">Rasterizer</a> you
+provide not just the shape, but also a foreground label. But before
+you can burn anything, you have to specify a background label used to
+fill the empty raster array.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>geo::{Geometry, Line, Point};
+<span class="kw">use </span>ndarray::array;
+
+<span class="kw">let </span>point = Point::new(<span class="number">3</span>, <span class="number">4</span>);
+<span class="kw">let </span>line = Line::new((<span class="number">0</span>, <span class="number">3</span>), (<span class="number">3</span>, <span class="number">0</span>));
+
+<span class="kw">let </span><span class="kw-2">mut </span>rasterizer = LabelBuilder::background(<span class="number">0</span>).width(<span class="number">4</span>).height(<span class="number">5</span>).build()<span class="question-mark">?</span>;
+rasterizer.rasterize(<span class="kw-2">&amp;</span>point, <span class="number">3</span>)<span class="question-mark">?</span>;
+rasterizer.rasterize(<span class="kw-2">&amp;</span>line, <span class="number">7</span>)<span class="question-mark">?</span>;
+
+<span class="kw">let </span>pixels = rasterizer.finish();
+<span class="macro">assert_eq!</span>(
+    pixels.mapv(|v| v <span class="kw">as </span>u8),
+    <span class="macro">array!</span>[
+        [<span class="number">0</span>, <span class="number">0</span>, <span class="number">7</span>, <span class="number">0</span>],
+        [<span class="number">0</span>, <span class="number">7</span>, <span class="number">7</span>, <span class="number">0</span>],
+        [<span class="number">7</span>, <span class="number">7</span>, <span class="number">0</span>, <span class="number">0</span>],
+        [<span class="number">7</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>],
+        [<span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">3</span>]
+    ]
+);</code></pre></div><h3 id="heatmaps"><a class="doc-anchor" href="#heatmaps">§</a>Heatmaps</h3>
+<p>What happens if two shapes touch the same pixel? In the example above,
+the last shape written wins. But you can change that behavior by
+specifying a different value for <a href="enum.MergeAlgorithm.html" title="enum geo_rasterize::MergeAlgorithm">MergeAlgorithm</a> using
+<a href="struct.LabelBuilder.html#method.algorithm" title="method geo_rasterize::LabelBuilder::algorithm">LabelBuilder::algorithm</a>. In fact, using <a href="enum.MergeAlgorithm.html#variant.Add" title="variant geo_rasterize::MergeAlgorithm::Add">MergeAlgorithm::Add</a>, you
+can easily make a heat map showing the shape density where each pixel value tells
+you the number of shapes that landed on it!</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code>
+<span class="kw">let </span>lines = <span class="macro">vec!</span>[Line::new((<span class="number">0</span>, <span class="number">0</span>), (<span class="number">5</span>, <span class="number">5</span>)), Line::new((<span class="number">5</span>, <span class="number">0</span>), (<span class="number">0</span>, <span class="number">5</span>))];
+
+<span class="kw">let </span><span class="kw-2">mut </span>rasterizer = LabelBuilder::background(<span class="number">0</span>)
+    .width(<span class="number">5</span>)
+    .height(<span class="number">5</span>)
+    .algorithm(MergeAlgorithm::Add)
+    .build()<span class="question-mark">?</span>;
+<span class="kw">for </span>line <span class="kw">in </span>lines {
+    rasterizer.rasterize(<span class="kw-2">&amp;</span>line, <span class="number">1</span>)<span class="question-mark">?</span>;
+}
+
+<span class="kw">let </span>pixels = rasterizer.finish();
+<span class="macro">assert_eq!</span>(
+    pixels.mapv(|v| v <span class="kw">as </span>u8),
+    <span class="macro">array!</span>[
+        [<span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>],
+        [<span class="number">0</span>, <span class="number">1</span>, <span class="number">0</span>, <span class="number">1</span>, <span class="number">1</span>],
+        [<span class="number">0</span>, <span class="number">0</span>, <span class="number">2</span>, <span class="number">1</span>, <span class="number">0</span>],
+        [<span class="number">0</span>, <span class="number">1</span>, <span class="number">1</span>, <span class="number">1</span>, <span class="number">0</span>],
+        [<span class="number">1</span>, <span class="number">1</span>, <span class="number">0</span>, <span class="number">0</span>, <span class="number">1</span>]
+    ]
+);
+</code></pre></div>
+<p>Two lines cross at the center where you’ll find <code>2</code>. Note that
+<a href="struct.Rasterizer.html" title="struct geo_rasterize::Rasterizer">Rasterizer</a> is not limited to integers; any copyable type that
+can be added will do. <a href="struct.Rasterizer.html" title="struct geo_rasterize::Rasterizer">Rasterizer</a> offers similar functionality
+to <a href="https://rasterio.readthedocs.io/">rasterio</a>’s
+<a href="https://rasterio.readthedocs.io/en/latest/api/rasterio.features.html#rasterio.features.rasterize">features.rasterize</a>
+function.</p>
+<h3 id="geographic-transforms"><a class="doc-anchor" href="#geographic-transforms">§</a>Geographic transforms</h3>
+<p>All our examples so far have assumed that our shapes’ coordinates are
+in the image space. In other words, we’ve assumed that the <code>x</code>
+coordinates will be in the range <code>0..width</code> and the <code>y</code> coordinates
+will be in the range <code>0..height</code>. Alas, that is often not the case!</p>
+<p>For satellite imagery (or remote sensing imagery in general), images
+will almost always specify both a Coordinate Reference System
+(<a href="https://en.wikipedia.org/wiki/Spatial_reference_system">CRS</a>) and an
+affine transformation in their metadata. See <a href="https://rasterio.readthedocs.io/en/latest/topics/georeferencing.html">rasterio’s
+Georeferencing</a>
+for more details.</p>
+<p>In order to work with most imagery, you have to convert your vector
+shapes from whatever their original CRS is (often <code>EPSG:4326</code> for
+geographic longitude and latitude) into whatever CRS your data file
+specifies (often a
+<a href="https://en.wikipedia.org/wiki/Universal_Transverse_Mercator_coordinate_system">UTM</a>
+projection but there are so many choices). Then, you need to apply an
+affine transformation to convert from world coordinates to pixel
+coordinates. Since raster imagery usually specifies the inverse
+transformation matrix (i.e. a <code>pix_to_geo</code> transform), you’ll first
+need to invert it to get a <code>geo_to_pix</code> transform before applying it
+to the coordinates. And now you’ve got pixel coordinates appropriate
+for your image data!</p>
+<p><a href="struct.BinaryRasterizer.html" title="struct geo_rasterize::BinaryRasterizer">BinaryRasterizer</a> and <a href="struct.Rasterizer.html" title="struct geo_rasterize::Rasterizer">Rasterizer</a> can ease this tedious process
+by taking care of the affine transformation. Make sure to pass a
+<a href="type.Transform.html" title="type geo_rasterize::Transform">Transform</a> object to <a href="struct.BinaryBuilder.html" title="struct geo_rasterize::BinaryBuilder">BinaryBuilder</a> or <a href="struct.LabelBuilder.html" title="struct geo_rasterize::LabelBuilder">LabelBuilder</a>. In either
+case, that transform is a <code>geo_to_pix</code> transform, which means you’ll
+have to:</p>
+<ul>
+<li>extract the CRS from your image and convert your shapes into that
+CRS (probably using <a href="https://docs.rs/proj/0.24.0/proj/index.html#integration-with-geo-types">the proj
+crate</a>
+and its integration with <a href="../geo/index.html" title="mod geo">geo types</a>,</li>
+<li>extract the <code>pix_to_geo</code> transform from your imagery metadata</li>
+<li>create a <a href="type.Transform.html" title="type geo_rasterize::Transform">Transform</a> instance from that data (GDAL represents these
+as a <code>[f64; 6]</code> array)</li>
+<li>call <code>transform.inverse</code> to get the corresponding <code>geo_to_pix</code>
+transform (since not all transforms are invertible, <code>inverse</code> gives
+you an <code>Option</code>)</li>
+<li>pass the resulting <a href="type.Transform.html" title="type geo_rasterize::Transform">Transform</a> to either <a href="struct.BinaryBuilder.html" title="struct geo_rasterize::BinaryBuilder">BinaryBuilder</a> or
+<a href="struct.LabelBuilder.html" title="struct geo_rasterize::LabelBuilder">LabelBuilder</a>.</li>
+</ul>
+<h3 id="performance"><a class="doc-anchor" href="#performance">§</a>Performance</h3>
+<p>For polygons, our runtime is <code>O(S * P * log(P))</code> where <code>S</code> is the
+number of scanlines (the polygon’s vertical extent in pixels) and <code>P</code>
+is the number of coordinates in the polygon exterior and all its
+holes. Memory consumption is approximately <code>P</code> machine words. Because
+runtime depends so heavily on the number of coordinates, simplifying
+polygons before rasterization can speed up rasterization dramatically,
+especially in cases where polygons have very high resolution compared
+to the pixel size.</p>
+<p>For other shapes, runtime is proportional to the number of pixels
+filled in.</p>
+<!-- say something about [Rasterizer] memory consumption -->
+<!-- compare gdal performance -->
+<h3 id="why-not-gdal"><a class="doc-anchor" href="#why-not-gdal">§</a>Why not GDAL?</h3>
+<p>GDAL is the swiss army chainsaw of geospatial data processing. It
+handles vector data (by wrapping <code>libgeos</code>) and many data formats. The
+version that ships with Ubuntu 21.10 links to 115 shared libraries
+which includes support for handling PDF files, Excel spreadsheets,
+curl, Kerberos, ODBC, several XML libraries, a linear algebra solver,
+several cryptographic packages, and on and on and on. GDAL is a giant
+pile of C and C++ code slapped together in a fragile
+assembly. Building GDAL is a rather unpleasant since even a stripped
+down version depends on a bunch of other C and C++ packages. If you
+want to quickly build and deploy a static binary for AWS Lambda, rust
+makes that really easy, right up until you need GDAL. Then things get
+really really difficult.</p>
+<p>Speaking of rust, I’ve been bitten multiple times in my career now
+with GDAL data race bugs that rust just forbids. I’m so tired.</p>
+<p>Configuring GDAL is deeply unpleasant. Quick! Look at the <a href="https://gdal.org/user/configoptions.html">GDAL
+configuration guide</a> and
+tell me which of the 170ish configuration knobs I need to adjust to
+control GDAL’s caching so that a lambda function that uses GDAL won’t
+leak memory due to image caching? Ha! That’s a trick question because
+you need multiple tunables to control the different caches. That’s
+what you expect for a 23 year old 2.5 MLOC software library.</p>
+<p>For a more pythonic perspective on the noGDAL movement, check out
+<a href="https://kipcrossing.github.io/2021-01-03-noGDAL/">Kipling Crossing</a>.</p>
+<h3 id="alternative-crates"><a class="doc-anchor" href="#alternative-crates">§</a>Alternative crates</h3>
+<ul>
+<li><a href="https://docs.rs/gdal/latest/gdal/raster/fn.rasterize.html">GDAL</a>
+can rasterize but then you’ll need to bring in GDAL which is
+difficult to deal with.</li>
+<li><a href="https://crates.io/crates/raqote">raqote</a> is a powerful 2D
+rasterizer intended for graphics.</li>
+<li><a href="https://crates.io/crates/rasterize">rasterize</a> is another pure rust
+library, but less mature than <code>raqote</code>.</li>
+</ul>
+<h3 id="contributing"><a class="doc-anchor" href="#contributing">§</a>Contributing</h3>
+<p>Contributions are welcome! Have a look at the
+<a href="https://github.com/msalib/geo-rasterize/issues">issues</a>, and open a
+pull request if you’d like to add an algorithm or some functionality.</p>
+<h3 id="license"><a class="doc-anchor" href="#license">§</a>License</h3>
+<p>Licensed under either of</p>
+<ul>
+<li>Apache License, Version 2.0 (<a href="LICENSE-APACHE">LICENSE-APACHE</a> or
+http://www.apache.org/licenses/LICENSE-2.0)</li>
+<li>MIT license (<a href="LICENSE-MIT">LICENSE-MIT</a> or
+http://opensource.org/licenses/MIT)</li>
+</ul>
+<p>at your option.</p>
+<h4 id="contribution"><a class="doc-anchor" href="#contribution">§</a>Contribution</h4>
+<p>Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in the work by you, as defined in the
+Apache-2.0 license, shall be dual licensed as above, without any
+additional terms or conditions.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.BinaryBuilder.html" title="struct geo_rasterize::BinaryBuilder">Binary<wbr>Builder</a></dt><dd>A builder that can construct instances of <a href="struct.BinaryRasterizer.html" title="struct geo_rasterize::BinaryRasterizer">BinaryRasterizer</a>, a
+rasterizer that can rasterize shapes into a 2-dimensional array of
+booleans.</dd><dt><a class="struct" href="struct.BinaryRasterizer.html" title="struct geo_rasterize::BinaryRasterizer">Binary<wbr>Rasterizer</a></dt><dd>A rasterizer that burns shapes into a 2-dimensional boolean
+array. It can be built either by calling
+<a href="struct.BinaryRasterizer.html#method.new" title="associated function geo_rasterize::BinaryRasterizer::new">new</a> or using <a href="struct.BinaryBuilder.html" title="struct geo_rasterize::BinaryBuilder">BinaryBuilder</a>.</dd><dt><a class="struct" href="struct.LabelBuilder.html" title="struct geo_rasterize::LabelBuilder">Label<wbr>Builder</a></dt><dd>A builder that constructs <a href="struct.Rasterizer.html" title="struct geo_rasterize::Rasterizer">Rasterizer</a>s. Whereas
+<a href="struct.BinaryRasterizer.html" title="struct geo_rasterize::BinaryRasterizer">BinaryRasterizer</a> produces an array of booleans, <a href="struct.Rasterizer.html" title="struct geo_rasterize::Rasterizer">Rasterizer</a>
+produces an array of some generic type (<code>Label</code>) that implements
+<a href="https://doc.rust-lang.org/1.95.0/core/marker/trait.Copy.html" title="trait core::marker::Copy">Copy</a> and <a href="https://doc.rust-lang.org/1.95.0/core/ops/arith/trait.Add.html" title="trait core::ops::arith::Add">Add</a> though
+typically you’d use a numeric type.</dd><dt><a class="struct" href="struct.Rasterizer.html" title="struct geo_rasterize::Rasterizer">Rasterizer</a></dt><dd><a href="struct.Rasterizer.html" title="struct geo_rasterize::Rasterizer">Rasterizer</a> rasterizes shapes like <a href="struct.BinaryRasterizer.html" title="struct geo_rasterize::BinaryRasterizer">BinaryRasterizer</a> but instead
+of making a boolean array, it produces an array of some generic
+type (<code>Label</code>) that implements <a href="https://doc.rust-lang.org/1.95.0/core/marker/trait.Copy.html" title="trait core::marker::Copy">Copy</a> and
+<a href="https://doc.rust-lang.org/1.95.0/core/ops/arith/trait.Add.html" title="trait core::ops::arith::Add">Add</a> though typically you’d use a numeric type.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.MergeAlgorithm.html" title="enum geo_rasterize::MergeAlgorithm">Merge<wbr>Algorithm</a></dt><dd>Conflict resolution strategy for cases where two shapes cover the
+same pixel.</dd><dt><a class="enum" href="enum.RasterizeError.html" title="enum geo_rasterize::RasterizeError">Rasterize<wbr>Error</a></dt><dd>Error type for this crate</dd></dl><h2 id="types" class="section-header">Type Aliases<a href="#types" class="anchor">§</a></h2><dl class="item-table"><dt><a class="type" href="type.Result.html" title="type geo_rasterize::Result">Result</a></dt><dd>Result type for this crate that uses <a href="enum.RasterizeError.html" title="enum geo_rasterize::RasterizeError">RasterizeError</a>.</dd><dt><a class="type" href="type.Transform.html" title="type geo_rasterize::Transform">Transform</a></dt><dd>Affine transform that describes how to convert world-space
+coordinates to pixel coordinates.</dd></dl></section></div></main></body></html>

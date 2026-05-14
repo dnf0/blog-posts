@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Closest","Geometry"],"macro":["geometry_delegate_impl","line_string","point","polygon"],"mod":["algorithm","prelude"],"struct":["GeometryCollection","Line","LineString","MultiLineString","MultiPoint","MultiPolygon","Point","Polygon","Rect","Triangle"],"trait":["CoordFloat","CoordNum","GeoFloat","GeoNum","ToGeo"],"type":["Coordinate"]};

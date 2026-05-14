@@ -1,0 +1,1 @@
+Result<zarrs::array::Array<AsyncObjectStore<object_store::aws::AmazonS3>>, ArrayCreateError>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["MergeAlgorithm","RasterizeError"],"struct":["BinaryBuilder","BinaryRasterizer","LabelBuilder","Rasterizer"],"type":["Result","Transform"]};

@@ -198,7 +198,7 @@ def build_duckdb_variants(variant: str, base_raw_path: Path):
         """)
 
 
-def build_zorder_variant(variant: str, base_raw_path: Path):
+def build_hilbert_variant(variant: str, base_raw_path: Path):
     """Use Polars and Rust plugin to generate Z-order Parquet."""
     import polars as pl
     import pyarrow.parquet as pq
@@ -209,13 +209,13 @@ def build_zorder_variant(variant: str, base_raw_path: Path):
     if scripts_dir not in sys.path:
         sys.path.append(scripts_dir)
         
-    from scripts.zorder_plugin import compute_zorder, compact_zorder
+    from scripts.hilbert_plugin import compute_hilbert, compact_hilbert
     
-    zorder_path = FORMAT_PATHS["parquet_zorder"][variant]
-    if _is_parquet_valid(zorder_path):
+    hilbert_path = FORMAT_PATHS["parquet_hilbert"][variant]
+    if _is_parquet_valid(hilbert_path):
         return
 
-    print(f"  [{variant}] writing zorder parquet (Polars/Rust)...")
+    print(f"  [{variant}] writing hilbert parquet (Polars/Rust)...")
     
     cog_path = FORMAT_PATHS["cog"]["raw"]
     with rasterio.open(cog_path) as src:
@@ -235,12 +235,12 @@ def build_zorder_variant(variant: str, base_raw_path: Path):
             ((90.0 - (transform.f + pl.col("row") * transform.e)) * 3600.0).round().cast(pl.UInt32).alias("global_row")
         ])
         .with_columns([
-            compute_zorder("global_col", "global_row").alias("z_index")
+            compute_hilbert("global_col", "global_row").alias("z_index")
         ])
         .group_by("band_value")
         .agg(pl.col("z_index"))
         .with_columns(
-            compact_zorder(pl.col("z_index")).alias("z_index")
+            compact_hilbert(pl.col("z_index")).alias("z_index")
         )
         .explode("z_index")
         .sort("z_index")
@@ -248,7 +248,7 @@ def build_zorder_variant(variant: str, base_raw_path: Path):
     )
     
     q.sink_parquet(
-        str(zorder_path),
+        str(hilbert_path),
         compression="zstd",
     )
 
@@ -340,6 +340,26 @@ def build_variant_zarrs():
         # but matching the COG chunking (512x512) is a good start.
         da.to_zarr(zarr_out, mode="w", compute=True)
 
+def build_variant_lance():
+    """Create Lance datasets from the Hilbert Parquet files."""
+    import lance
+    import polars as pl
+    print("Building Lance datasets...")
+    for variant in DATA_VARIANTS:
+        lance_out = FORMAT_PATHS["lance"][variant]
+        if lance_out.exists():
+            print(f"  Lance {variant} already exists, skipping")
+            continue
+
+        parquet_path = FORMAT_PATHS["parquet_hilbert"][variant]
+        if not parquet_path.exists():
+            print(f"  [{variant}] Hilbert parquet not found, skipping lance build")
+            continue
+            
+        print(f"  [{variant}] writing lance...")
+        df = pl.read_parquet(parquet_path)
+        lance.write_dataset(df.to_arrow(), lance_out)
+
 def main():
     print("=== Stage 1: Data Preparation ===")
     t0 = time.time()
@@ -352,7 +372,9 @@ def main():
     for variant in DATA_VARIANTS:
         print(f"\n--- Variant: {variant} ---")
         build_duckdb_variants(variant, base_raw_path)
-        build_zorder_variant(variant, base_raw_path)
+        build_hilbert_variant(variant, base_raw_path)
+        
+    build_variant_lance()
 
     sizes = record_file_sizes()
     print("\nFile sizes:")

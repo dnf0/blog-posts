@@ -1,7 +1,7 @@
 # Best combo per query type
 
-| Query type   | Fastest combo             | Lowest-memory combo        |
-|:-------------|:--------------------------|:---------------------------|
-| Bbox window  | COG / Rasterio (72.5 ms)  | COG / Rasterio (121.1 MiB) |
-| Point sample | COG / Rasterio (119.7 ms) | COG / Rasterio (130.7 MiB) |
-| Polygon      | COG / Rasterio (73.2 ms)  | COG / Rasterio (122.2 MiB) |
+| Query type   | Fastest combo                           | Lowest-memory combo        |
+|:-------------|:----------------------------------------|:---------------------------|
+| Bbox window  | COG / Rasterio (75.3 ms)                | COG / Rasterio (127.0 MiB) |
+| Point sample | COG / Rasterio (144.5 ms)               | Zarr / xarray (170.7 MiB)  |
+| Polygon      | Zarr / Pure Rust Zarr (zarrs) (75.2 ms) | COG / Rasterio (134.1 MiB) |

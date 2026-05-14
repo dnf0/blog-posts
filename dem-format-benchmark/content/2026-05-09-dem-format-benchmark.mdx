@@ -25,7 +25,7 @@ Most people reach for `rioxarray.open_rasterio()` and immediately OOM. But there
 
 | Format | Description |
 |--------|-------------|
-| COG | Cloud Optimized GeoTIFF with internal overviews and tiling |
+| COG | Cloud Optimised GeoTIFF with internal overviews and tiling |
 | Parquet (flat) | Row-per-pixel: `x, y, band_value` columns |
 | Parquet + S2 | Flat + `s2_cell` column at level 14 (~0.03 km²) |
 | Parquet + H3 | Flat + `h3_cell` column at resolution 12 (~0.03 km²) |
@@ -146,7 +146,7 @@ The benchmark harness is format- and tool-agnostic — add your own by extending
 ## References
 
 - [Copernicus GLO-30 DEM](https://spacedata.copernicus.eu/collections/copernicus-digital-elevation-model)
-- [Cloud Optimized GeoTIFF specification](https://www.cogeo.org/)
+- [Cloud Optimised GeoTIFF specification](https://www.cogeo.org/)
 - [GeoParquet specification](https://geoparquet.org/)
 - [S2 Geometry](http://s2geometry.io/)
 - [H3 Spatial Index](https://h3geo.org/)

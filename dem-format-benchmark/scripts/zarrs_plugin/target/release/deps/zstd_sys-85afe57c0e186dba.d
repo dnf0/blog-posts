@@ -1,0 +1,9 @@
+/Users/danielfisher/repos/blog-posts/dem-format-benchmark/scripts/zarrs_plugin/target/release/deps/zstd_sys-85afe57c0e186dba.d: /Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/lib.rs /Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/bindings_zstd_experimental.rs /Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/bindings_zdict_experimental.rs
+
+/Users/danielfisher/repos/blog-posts/dem-format-benchmark/scripts/zarrs_plugin/target/release/deps/libzstd_sys-85afe57c0e186dba.rlib: /Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/lib.rs /Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/bindings_zstd_experimental.rs /Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/bindings_zdict_experimental.rs
+
+/Users/danielfisher/repos/blog-posts/dem-format-benchmark/scripts/zarrs_plugin/target/release/deps/libzstd_sys-85afe57c0e186dba.rmeta: /Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/lib.rs /Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/bindings_zstd_experimental.rs /Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/bindings_zdict_experimental.rs
+
+/Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/lib.rs:
+/Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/bindings_zstd_experimental.rs:
+/Users/danielfisher/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/bindings_zdict_experimental.rs:

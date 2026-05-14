@@ -1,0 +1,9 @@
+[package]
+name = "test_gr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+euclid = "0.22.14"
+geo-rasterize = "0.1.2"
+geo-types = "0.7.19"
