@@ -13,6 +13,8 @@ description: "An empirical benchmark of architectural approaches for dynamically
 **TL;DR:** Global VRTs fail at scale due to the computational overhead of XML parsing. For production systems supporting high-concurrency geospatial queries, physically converting the data to **Zarr v3 Sharded Archives** or using modern columnar formats like **Lance** yields sub-millisecond retrieval latencies.
 </Callout>
 
+This investigation is prefaced by an architectural reality: the deployment of a global Virtual Raster (VRT) was originally implemented as a naive stop-gap to a burgeoning data management problem, and it rapidly proved to be highly problematic in production.
+
 When managing extensive geospatial datasets—such as global 30-metre resolution Digital Elevation Models (DEMs) or climate hazard models spanning multiple decades and scenarios—data providers conventionally partition their rasters into thousands or millions of Cloud Optimised GeoTIFFs (COGs). 
 
 The established Geospatial Data Abstraction Library (GDAL) ecosystem approach for querying across these partitioned files is to construct a Virtual Raster (VRT). Originally introduced in the early 2000s to provide a unified dataset abstraction without duplicating data on local storage for desktop Geographic Information Systems (GIS), a VRT functions as an XML document that maps a global spatial grid to the URIs of the underlying COGs. When the VRT is opened via libraries such as `rasterio` or `gdal` with a bounding box, the software resolves the spatial intersection and retrieves the required files.
