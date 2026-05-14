@@ -4,11 +4,10 @@ This document defines the strict editorial, stylistic, and architectural standar
 
 ## 1. Standardised Post Layout
 Every blog post MUST strictly adhere to the following structural order at the top of the document:
-1. **H1 Title:** The title of the post formatted as an H1 heading (e.g., `# Effective Querying of...`).
-2. **Metadata Line:** An italicised line containing the date, read time, and code-formatted tags (e.g., `*May 10, 2026 • 18 min read • Tags: \`geospatial\`, \`python\`*`).
-3. **TL;DR Callout:** A `<Callout type="info">` block starting with `**TL;DR:**` containing the core architectural findings. This must immediately follow the metadata line.
-4. **Introduction:** The opening narrative paragraphs flowing directly after the callout, without a preceding H2 header.
-5. **Table of Contents:** An auto-generated H2 `## Table of Contents` with jump links to the rest of the post.
+1. **Metadata Line:** An italicised line containing the date, read time, and code-formatted tags (e.g., `*May 10, 2026 • 18 min read • Tags: \`geospatial\`, \`python\`*`).
+2. **TL;DR Callout:** A `<Callout type="info">` block starting with `**TL;DR:**` containing the core architectural findings. This must immediately follow the metadata line.
+3. **Introduction:** The opening narrative paragraphs flowing directly after the callout, without a preceding H2 header.
+4. **Table of Contents:** An auto-generated H2 `## Table of Contents` with jump links to the rest of the post.
 
 ## 2. Tone and Voice
 *   **Academic & Professional:** Maintain a rigorous, objective, and measured tone.

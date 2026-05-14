@@ -16,11 +16,10 @@
 </head>
 <body>
 <hr />
-<h2>title: &quot;Why Global VRTs Fail at Scale (And 6 Ways to Fix It)&quot;
+<h2>title: &quot;Why Global VRTs Fail at Scale (Evaluating 5 Alternative Architectures)&quot;
 date: &quot;2026-05-12&quot;
 tags: [geospatial, python, zarr, benchmarking, rasterio]
 description: &quot;An empirical benchmark of architectural approaches for dynamically querying extensive collections of Cloud Optimised GeoTIFFs (COGs).&quot;</h2>
-<h1>Why Global VRTs Fail at Scale (Evaluating 5 Alternative Architectures)</h1>
 <p><em>May 12, 2026 • 6 min read • Tags: <code>geospatial</code>, <code>python</code>, <code>zarr</code>, <code>benchmarking</code>, <code>rasterio</code>, <code>data-engineering</code></em></p>
 <div class="callout">
 **TL;DR:** Global VRTs fail at scale due to the computational overhead of XML parsing. For production systems supporting high-concurrency geospatial queries, physically converting the data to **Zarr v3 Sharded Archives** or using modern columnar formats like **Lance** yields sub-millisecond retrieval latencies.
