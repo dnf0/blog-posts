@@ -6,6 +6,8 @@ description: "How I implemented a serverless SSH Certificate Authority using AWS
 ---
 *15 min read • Tags: `security`, `aws`, `serverless`, `ssh`, `hpc`*
 
+# Solving the Static SSH Key Nightmare with a Serverless CA
+
 <Callout type="info">
 **TL;DR:** To satisfy organisational Single Sign-On (SSO) mandates without breaking developer workflows in remote IDEs like Cursor, I replaced traditional SSH public keys on our High-Performance Computing (HPC) cluster with short-lived (8-hour) SSH certificates. I implemented a serverless Certificate Authority (CA) using AWS Lambda and AWS Secrets Manager. This architectural shift reduced our server-side credential footprint from managing per-user keys to a single CA key and eliminated manual revocation overhead, all while maintaining seamless compatibility with native SSH tooling.
 </Callout>
@@ -17,6 +19,12 @@ This legacy approach fundamentally expects static, unchanging credentials. If an
 The organisational requirement was clear: all access must be authenticated via our central AWS SSO system. However, the operational constraint was equally rigid: any solution had to support native SSH tooling. Our engineering team relies heavily on remote development environments, specifically Cursor and Visual Studio Code (VS Code). These tools use the standard SSH protocol behind the scenes to sync file systems and execute language servers directly on the remote compute nodes. Standard enterprise workarounds—like clunky web-based terminals or proprietary proxy wrappers—were not viable, as they break the seamless remote IDE experience. I needed a mechanism to bridge the modern world of AWS SSO with the decades-old native OpenSSH daemon running on our cluster.
 
 ## Table of Contents
+
+- [The Concept: OpenSSH Certificates](#the-concept-openssh-certificates)
+- [Architecture Breakdown: A Serverless CA](#architecture-breakdown-a-serverless-ca)
+- [Production Realities and Trade-offs](#production-realities-and-trade-offs)
+- [Empirical Scorecard](#empirical-scorecard)
+- [Conclusion](#conclusion)
 
 ## The Concept: OpenSSH Certificates
 
@@ -70,7 +78,7 @@ To quantify the architectural improvements, I compared the legacy static key app
 
 By adopting OpenSSH certificates and wrapping the issuance process in a serverless AWS architecture, I successfully aligned our HPC cluster access with strict corporate SSO mandates. This approach eliminated the substantial security risks associated with static SSH keys, reducing our credential footprint on the servers to a single, easily rotated CA key (see Table 1). 
 
-Most importantly, this security enhancement did not degrade the developer experience. Because the system outputs standard SSH certificates, engineers continue to use Cursor, VS Code, and standard terminal multiplexers without friction. In practice, treating infrastructure access as a dynamic, verifiable event rather than a static configuration state provides a robust foundation for secure, scalable remote development.
+Most importantly, this security enhancement did not degrade the developer experience. Because the system outputs standard SSH certificates, engineers continue to use Cursor, VS Code, and terminal tools like `tmux` (which keep long-running jobs alive even if a laptop disconnects) without any friction. In practice, treating infrastructure access as a dynamic, verifiable event rather than a static configuration state provides a robust foundation for secure, scalable remote development.
 
 ## References
 - [1] [OpenSSH Certificates](https://www.openbsd.org/papers/bsdcan-sign.html)
