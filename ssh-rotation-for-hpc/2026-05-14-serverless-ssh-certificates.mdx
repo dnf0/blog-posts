@@ -31,10 +31,10 @@ The architecture operates through the following sequence:
 1. **Authentication:** The developer authenticates using their existing AWS SSO credentials via the AWS Command Line Interface (CLI). This satisfies the organisational requirement without introducing a separate identity provider.
 2. **Invocation:** The developer invokes a specific AWS Lambda function (`cluster-ssh-sign-cert`), passing their public key as a JSON payload.
 3. **Verification:** The Lambda function, executing under a highly restricted Identity and Access Management (IAM) role, verifies the caller's SSO identity. It then cross-references the submitted public key against a predefined registry maintained in AWS Systems Manager (SSM) Parameter Store to ensure the key belongs to the authenticated user.
-4. **Signing:** Upon successful verification, the Lambda function retrieves the 4096-bit RSA CA private key, which is securely stored in AWS Secrets Manager. It uses an embedded OpenSSH layer to sign the developer's public key.
+4. **Signing:** Upon successful verification, the Lambda function retrieves the 4096-bit RSA CA private key, which is securely stored in AWS Secrets Manager. Because AWS Lambda's default execution environment does not include SSH utilities, I attached a custom AWS Lambda Layer containing the native `ssh-keygen` binary. The function invokes this binary to cryptographically sign the developer's public key.
 5. **Issuance:** The function returns a certificate configured with a strict 8-hour Time-To-Live (TTL).
 
-On the cluster side, the configuration footprint is microscopic. The `/etc/ssh/sshd_config` file requires only two modifications: setting `TrustedUserCAKeys` to point to the CA's public key, and explicitly enabling RSA signatures (`PubkeyAcceptedAlgorithms +ssh-rsa`), which are disabled by default in modern OpenSSH distributions but required for our 4096-bit RSA CA.
+On the cluster side, the configuration footprint is microscopic. The `/etc/ssh/sshd_config` file requires only two modifications: setting `TrustedUserCAKeys` to point to the CA's public key, and explicitly enabling RSA signatures (`PubkeyAcceptedAlgorithms +ssh-rsa`). Modern OpenSSH distributions disable RSA signatures by default due to historical associations with the weak SHA-1 hashing algorithm; however, because our CA specifically generates strong 4096-bit RSA keys, we must explicitly re-enable this protocol support to allow the daemon to validate the certificates.
 
 ## Production Realities and Trade-offs
 
