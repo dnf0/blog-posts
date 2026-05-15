@@ -1,6 +1,6 @@
 ---
 title: "Replacing Static SSH Keys with a Serverless Certificate Authority"
-date: "2026-05-14"
+date: "2026-05-15"
 tags: ["security", "aws", "serverless", "ssh", "hpc"]
 description: "How I implemented a serverless SSH Certificate Authority using AWS Lambda to align HPC cluster access with corporate SSO mandates, without breaking remote IDE workflows."
 ---
@@ -46,8 +46,8 @@ The architecture operates through the following sequence:
 
 1. **Authentication:** The developer authenticates using their existing AWS SSO credentials via the AWS Command Line Interface (CLI). This ensures they have an active session with our corporate identity provider. This satisfies the organisational requirement without forcing us to build a separate login portal.
 2. **Invocation:** Once authenticated, the developer runs a script that invokes a specific AWS Lambda function. AWS Lambda is a compute service that lets you run code without provisioning or managing servers. The developer passes their public key to this function as a JSON payload.
-3. **Verification:** The Lambda function executes under a highly restricted Identity and Access Management (IAM) role. It first verifies the caller's SSO identity to ensure they are who they claim to be. It then cross-references the submitted public key against a predefined registry maintained in AWS Systems Manager (SSM) Parameter Store (a secure key-value store). This check ensures the submitted key actually belongs to the authenticated user and hasn't been swapped out.
-4. **Signing:** Upon successful verification, the Lambda function needs to act as the Certificate Authority. It retrieves the CA's highly sensitive 4096-bit RSA private key, which is securely locked in AWS Secrets Manager. Because AWS Lambda's default execution environment is stripped down and does not include standard SSH utilities, I attached a custom AWS Lambda Layer. A Layer is simply a ZIP archive that contains additional code or data; in this case, it contains the native `ssh-keygen` binary. The function invokes this binary, feeding it the CA's private key, to cryptographically sign the developer's public key.
+3. **Verification:** The Lambda function executes under a highly restricted Identity and Access Management (IAM) role. It first verifies the caller's SSO identity to ensure they are who they claim to be. It then cross-references the submitted public key against a predefined registry maintained in AWS Systems Manager (SSM) Parameter Store [2] (a secure key-value store). This check ensures the submitted key actually belongs to the authenticated user and hasn't been swapped out.
+4. **Signing:** Upon successful verification, the Lambda function needs to act as the Certificate Authority. It retrieves the CA's highly sensitive 4096-bit RSA private key, which is securely locked in AWS Secrets Manager [3]. Because AWS Lambda's default execution environment is stripped down and does not include standard SSH utilities, I attached a custom AWS Lambda Layer. A Layer is simply a ZIP archive that contains additional code or data; in this case, it contains the native `ssh-keygen` binary. The function invokes this binary, feeding it the CA's private key, to cryptographically sign the developer's public key.
 5. **Issuance:** The function returns the newly minted certificate, configured with a strict 8-hour Time-To-Live (TTL).
 
 On the cluster side, the configuration footprint is microscopic. The `/etc/ssh/sshd_config` file—the configuration file for the SSH daemon running on the servers—requires only two modifications. First, setting `TrustedUserCAKeys` to point to the CA's public key. Second, explicitly enabling RSA signatures (`PubkeyAcceptedAlgorithms +ssh-rsa`). Modern OpenSSH distributions disable RSA signatures by default due to historical associations with the weak SHA-1 hashing algorithm; however, because our CA specifically generates mathematically strong 4096-bit RSA keys, we must explicitly re-enable this protocol support to allow the daemon to validate the certificates.
@@ -82,7 +82,7 @@ Most importantly, this security enhancement did not degrade the developer experi
 
 ## References
 - [1] [OpenSSH Certificates](https://www.openbsd.org/papers/bsdcan-sign.html)
-- [AWS Secrets Manager Documentation](https://aws.amazon.com/secrets-manager/)
-- [AWS Systems Manager Parameter Store](https://aws.amazon.com/systems-manager/features/#Parameter_Store)
+- [2] [AWS Systems Manager Parameter Store](https://aws.amazon.com/systems-manager/features/#Parameter_Store)
+- [3] [AWS Secrets Manager Documentation](https://aws.amazon.com/secrets-manager/)
 
 *Transparency Note: This blog post was written and structured with the assistance of an AI agent (Gemini).*
