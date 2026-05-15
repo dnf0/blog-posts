@@ -6,8 +6,6 @@ description: "How I implemented a serverless SSH Certificate Authority using AWS
 ---
 *15 min read • Tags: `security`, `aws`, `serverless`, `ssh`, `hpc`*
 
-# Replacing Static SSH Keys with a Serverless Certificate Authority
-
 <Callout type="info">
 **TL;DR:** To satisfy organisational Single Sign-On (SSO) mandates without breaking developer workflows in remote IDEs like Cursor, I replaced traditional SSH public keys on our High-Performance Computing (HPC) cluster with short-lived (8-hour) SSH certificates. I implemented a serverless Certificate Authority (CA) using AWS Lambda and AWS Secrets Manager. This architectural shift reduced our server-side credential footprint from managing per-user keys to a single CA key and eliminated manual revocation overhead, all while maintaining seamless compatibility with native SSH tooling.
 </Callout>
