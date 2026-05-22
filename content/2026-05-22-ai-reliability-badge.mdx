@@ -1,5 +1,5 @@
 ---
-title: "Code Coverage is Dead: Pinning an AI Reliability Badge on Your README"
+title: "Code Coverage is 'Dead': Pinning an AI Reliability Badge on Your README"
 date: "2026-05-22"
 tags: [ai-engineering, github-actions, ci-cd, reliability]
 description: "How to dynamically track and expose automated AI reviewer performance against a golden set using a GitHub Actions badge."
@@ -8,35 +8,35 @@ description: "How to dynamically track and expose automated AI reviewer performa
 *4 min read • Tags: `ai-engineering`, `github-actions`, `ci-cd`, `reliability`*
 
 <Callout type="info">
-**TL;DR:** Traditional code coverage is insufficient for evaluating the quality of non-deterministic AI features. By integrating an automated AI reviewer that runs against a set of "golden assessments", teams can automatically block PRs that degrade AI performance. We expose this real-time reliability score directly on the repository README using a dynamic GitHub Actions badge.
+**TL;DR:** Traditional code coverage is insufficient for evaluating the quality of non-deterministic AI features. By integrating an automated AI reviewer that runs against a set of "golden assessments", teams can automatically block PRs that degrade AI performance. My current organisation and I expose this real-time reliability score directly on the repository README using a dynamic GitHub Actions badge.
 </Callout>
 
-The shift from deterministic procedural code to probabilistic AI necessitates a fundamental change in how we think about continuous integration. Historically, test suites relied on absolute binary assertions: a method either returned the correct string, or the test failed. But when you're dealing with LLMs and automated AI reviewer systems, responses are inherently non-deterministic. Trying to evaluate these systems by looking at traditional static code coverage metrics gives you a false sense of security that completely misses the actual quality of the output [1]. It tells you that the LLM API was called, not that the response was accurate or useful.
+The shift from deterministic procedural code to probabilistic AI necessitates a fundamental change in how I think about continuous integration. Historically, test suites relied on absolute binary assertions: a method either returned the correct string, or the test failed. But when dealing with LLMs and automated AI reviewer systems, responses are inherently non-deterministic. Trying to evaluate these systems by looking at traditional static code coverage metrics gives you a false sense of security that completely misses the actual quality of the output [1]. It tells you that the LLM API was called, not that the response was accurate or useful.
 
-To address this, we've moved away from standard coverage percentage metrics in favour of evaluating the agent against a curated set of "golden assessments". Think of these as a rigorous matrix of known prompts paired with human-verified optimal outcomes. 
+To address this, my current organisation and I have moved away from standard coverage percentage metrics in favour of evaluating the agent against a curated set of "golden assessments". Think of these as a rigorous matrix of known prompts paired with human-verified optimal outcomes. 
 
-Our golden set is broken down into specific competency tiers:
+My current organisation's golden set is broken down into specific competency tiers:
 - **Omission Detection:** Can the agent reliably spot when mandatory error handling or logging is missing from a new function?
-- **Style Alignment:** Does the agent correctly flag deviations from our internal naming conventions without being overly pedantic?
+- **Style Alignment:** Does the agent correctly flag deviations from my current organisation's internal naming conventions without being overly pedantic?
 - **Security Posture:** Does it successfully identify hardcoded secrets or SQL injection vectors in obfuscated test payloads?
 
-When a developer submits a pull request, the automated AI reviewer runs its logic against this golden set. If the system catches the agent degrading—like dropping key entities or failing to spot obvious anti-patterns it previously caught—the CI pipeline rejects the changes. This works because it treats the LLM like an engineer taking a certification exam: we don't care *how* it arrived at the answer (i.e., the executed code paths), only that the semantic output remains consistently correct across hundreds of known scenarios.
+When a developer submits a pull request, the automated AI reviewer runs its logic against this golden set. If the system catches the agent degrading—like dropping key entities or failing to spot obvious anti-patterns it previously caught—the CI pipeline rejects the changes. This works because it treats the LLM like an engineer taking a certification exam: I don't care *how* it arrived at the answer (i.e., the executed code paths), only that the semantic output remains consistently correct across hundreds of known scenarios.
 
 ## What Does the AI Reviewer Actually Do?
 
-Before diving into how we measure it, it helps to understand what the automated AI reviewer is. We built an orchestrator that listens for new pull requests across our repositories. When a developer opens a PR, this system fetches the code diffs and feeds them into an LLM. The agent's job is to act as a senior engineer: it scans the changes for architectural anti-patterns, flags security vulnerabilities, checks alignment with our internal style guides, and posts actionable feedback directly as PR comments. 
+Before diving into how it is measured, it helps to understand what the automated AI reviewer is. My current organisation and I built an orchestrator that listens for new pull requests across the organisation's repositories. When a developer opens a PR, this system fetches the code diffs and feeds them into an LLM. The agent's job is to act as a senior engineer: it scans the changes for architectural anti-patterns, flags security vulnerabilities, checks alignment with internal style guides, and posts actionable feedback directly as PR comments. 
 
-Because the agent is making subjective judgments on complex code, its output isn't a simple pass/fail. It might give great feedback on one PR but hallucinate on another. That's why we need a robust way to constantly assess its core competency.
+Because the agent is making subjective judgments on complex code, its output isn't a simple pass/fail. It might give great feedback on one PR but hallucinate on another. That's why my current organisation and I need a robust way to constantly assess its core competency.
 
 ## Swapping Coverage for Outcome Verification
 
-We are basically comparing two distinct paradigms for keeping a codebase healthy. The old-school approach is static code coverage, which mathematically checks which lines of Python were actually executed during testing. Sure, it stops catastrophic syntax errors, but it's blind to semantic quality.
+I am basically comparing two distinct paradigms for keeping a codebase healthy. The old-school approach is static code coverage, which mathematically checks which lines of Python were actually executed during testing. Sure, it stops catastrophic syntax errors, but it's blind to semantic quality.
 
-The new dynamic AI performance tracking paradigm swaps static coverage for functional outcome verification. The entire process is orchestrated inside a GitHub Actions environment. A pull request triggers our reviewer script, which authenticates via Workload Identity Federation (WIF) and processes the golden assessments. The script outputs an aggregate pass rate percentage—the AI's current reliability score. To make sure everyone in the organisation can see this metric, the pipeline updates a dynamic SVG badge that sits proudly on the repository's `README.md`.
+The new dynamic AI performance tracking paradigm swaps static coverage for functional outcome verification. The entire process is orchestrated inside a GitHub Actions environment. A pull request triggers the reviewer script, which authenticates via Workload Identity Federation (WIF) and processes the golden assessments. The script outputs an aggregate pass rate percentage—the AI's current reliability score. To make sure everyone in the organisation can see this metric, the pipeline updates a dynamic SVG badge that sits proudly on the repository's `README.md`.
 
 ## The Actions Workflow
 
-To get this dynamic badging system running, we use a custom GitHub Actions workflow. The pipeline runs the reviewer, scrapes the pass rate, and uses an external badging service (like Shields.io) or a custom Gist to render the metric.
+To get this dynamic badging system running, my current organisation and I use a custom GitHub Actions workflow. The pipeline runs the reviewer, scrapes the pass rate, and uses an external badging service (like Shields.io) or a custom Gist to render the metric.
 
 Here is the GitHub Actions YAML snippet showing how the evaluation runs and the badge gets minted:
 
