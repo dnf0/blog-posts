@@ -40,3 +40,22 @@ Once you have the inputs, generate a structured outline that maps exactly to the
 You MUST present this outline to the user and ask for their explicit approval.
 Do NOT write a single paragraph of the draft until the user says "yes" or provides tweaks.
 **</HARD-GATE>**
+
+## Phase 3: Drafting & The Editorial Gauntlet
+
+Only after outline approval, write the full draft to `content/YYYY-MM-DD-<topic>.mdx`. 
+Apply the Frontmatter, British English spelling, and specific styling required by the guide.
+
+### The Editorial Gauntlet (Self-Review Checklist)
+After writing the draft, you MUST audit your own work. Do not ask the user to do this. Fix any violations you find.
+
+Checklist:
+1. **Metric Anchoring:** Does every metric (e.g., latency, size) explicitly point to a table/figure (e.g., `(see Table X)`)?
+2. **Acronyms:** Are they defined on first use? (e.g., Virtual Raster (VRT)).
+3. **Paragraph Flow:** Are there any single-sentence paragraphs? (Merge them).
+4. **Tone:** Is the tone rigorous and objective? (Remove hyperbole like "blistering").
+5. **Links:** Are all links active? (Use tools to check HTTP 200 responses).
+6. **British English:** Ensure words like `optimised`, `modelling`, `centre` are used.
+
+### Handoff
+Present the final file path to the user, summarize the self-review checks you passed, and ask for their final review.
