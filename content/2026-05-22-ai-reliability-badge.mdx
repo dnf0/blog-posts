@@ -30,7 +30,7 @@ Because the agent is making subjective judgments on complex code, its output isn
 
 ## Swapping Coverage for Outcome Verification
 
-I am basically comparing two distinct paradigms for keeping a codebase healthy. The old-school approach is static code coverage, which mathematically checks which lines of Python were actually executed during testing. Sure, it stops catastrophic syntax errors, but it's blind to semantic quality.
+I am basically comparing two distinct paradigms for keeping a codebase healthy. The old-school approach is static code coverage, which mathematically checks which lines of code were actually executed during testing. Sure, it stops catastrophic syntax errors, but it's blind to semantic quality.
 
 The new dynamic AI performance tracking paradigm swaps static coverage for functional outcome verification. The entire process is orchestrated inside a GitHub Actions environment. A pull request triggers the reviewer script, which authenticates via Workload Identity Federation (WIF) and processes the golden assessments. The script outputs an aggregate pass rate percentage—the AI's current reliability score. To make sure everyone can see this metric, the pipeline updates a dynamic SVG badge that sits proudly on the repository's `README.md`.
 
