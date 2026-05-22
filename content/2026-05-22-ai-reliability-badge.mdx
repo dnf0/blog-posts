@@ -87,6 +87,8 @@ This setup extracts the performance metric and pushes it to a distinct file. The
 
 ![AI Reliability Badge](https://img.shields.io/badge/AI_Assessment-85%25-green?logo=github)
 
+Because the badging pipeline is decoupled from the specific assessment logic, this architecture easily scales to support multiple performance badges. For example, instead of a single aggregate score, you can generate specific badges for different assessment vectors—such as a "500s Avoidance" badge, a "Context Retrieval Accuracy" badge, or a "Security Posture" badge—providing an immediate, granular dashboard of the agent's current capabilities.
+
 ## Wrapping Up
 
 Dynamically measuring and badging performance against a golden set is a highly useful way to track the reliability of non-deterministic systems. It gives you an immediate visual indicator of agent health that acts as a modern alternative to traditional code coverage. By enforcing this check right at the CI layer, engineering teams can make sure performance drops are caught and blocked long before the flawed logic merges into the main branch.
