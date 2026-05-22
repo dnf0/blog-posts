@@ -2,7 +2,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Preview: Why Global VRTs Fail</title>
+<title>Preview: AI Reliability Badge</title>
 <style>
   body { max-width: 900px; margin: 40px auto; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; }
   pre { background: #f6f8fa; padding: 16px; overflow-x: auto; border-radius: 6px; font-size: 85%; }
@@ -16,138 +16,84 @@
 </head>
 <body>
 <hr />
-<h2>title: &quot;Why Global VRTs Fail at Scale (Evaluating 5 Alternative Architectures)&quot;
-date: &quot;2026-05-12&quot;
-tags: [geospatial, python, zarr, benchmarking, rasterio]
-description: &quot;An empirical benchmark of architectural approaches for dynamically querying extensive collections of Cloud Optimised GeoTIFFs (COGs).&quot;</h2>
-<p><em>May 12, 2026 • 6 min read • Tags: <code>geospatial</code>, <code>python</code>, <code>zarr</code>, <code>benchmarking</code>, <code>rasterio</code>, <code>data-engineering</code></em></p>
+<h2>title: &quot;Code Coverage is 'Dead': Pinning an AI Reliability Badge on Your README&quot;
+date: &quot;2026-05-22&quot;
+tags: [ai-engineering, github-actions, ci-cd, reliability]
+description: &quot;How to dynamically track and expose automated AI reviewer performance against a golden set using a GitHub Actions badge.&quot;</h2>
+<p><em>4 min read • Tags: <code>ai-engineering</code>, <code>github-actions</code>, <code>ci-cd</code>, <code>reliability</code></em></p>
 <div class="callout">
-**TL;DR:** Global VRTs fail at scale due to the computational overhead of XML parsing. For production systems supporting high-concurrency geospatial queries, physically converting the data to **Zarr v3 Sharded Archives** or using modern columnar formats like **Lance** yields sub-millisecond retrieval latencies.
+**TL;DR:** Traditional code coverage is insufficient for evaluating the quality of non-deterministic AI features. By integrating an automated AI reviewer that runs against a set of "golden assessments", teams can automatically block PRs that degrade AI performance. I expose this real-time reliability score directly on the repository README using a dynamic GitHub Actions badge.
 </div>
-<p>This investigation is prefaced by an architectural reality: the deployment of a global Virtual Raster (VRT) was originally implemented as a naive stop-gap to a burgeoning data management problem, and it rapidly proved to be highly problematic in production.</p>
-<p>When managing extensive geospatial datasets—such as global 30-metre resolution Digital Elevation Models (DEMs) or climate hazard models spanning multiple decades and scenarios—data providers conventionally partition their rasters into thousands or millions of Cloud Optimised GeoTIFFs (COGs).</p>
-<p>The established Geospatial Data Abstraction Library (GDAL) ecosystem approach for querying across these partitioned files is to construct a Virtual Raster (VRT). Originally introduced in the early 2000s to provide a unified dataset abstraction without duplicating data on local storage for desktop Geographic Information Systems (GIS), a VRT functions as an XML document that maps a global spatial grid to the URIs of the underlying COGs. When the VRT is opened via libraries such as <code>rasterio</code> or <code>gdal</code> with a bounding box, the software resolves the spatial intersection and retrieves the required files.</p>
-<p>However, a critical limitation emerges when attempting to scale this local file abstraction paradigm to modern cloud-native infrastructures: <strong>VRTs rely on monolithic XML files that require complete client-side evaluation.</strong> At the scale of 10 million COGs, a VRT manifests as a multi-gigabyte XML file. When a computational node attempts to query a single spatial slice, it must parse the entirety of the XML structure into RAM. This architectural constraint introduces substantial memory overhead, severe latency degradation, and inevitable Out-Of-Memory (OOM) failures.</p>
-<h2>Table of Contents</h2>
+<p>The shift from deterministic procedural code to probabilistic AI necessitates a fundamental change in how one thinks about continuous integration. Historically, test suites relied on absolute binary assertions: a method either returned the correct string, or the test failed. But when dealing with LLMs and automated AI reviewer systems, responses are inherently non-deterministic. Trying to evaluate these systems by looking at traditional static code coverage metrics gives you a false sense of security that completely misses the actual quality of the output [1]. It tells you that the LLM API was called, not that the response was accurate or useful.</p>
+<p>To address this, I have moved away from standard coverage percentage metrics in favour of evaluating the agent against a curated set of &quot;golden assessments&quot;. Think of these as a rigorous matrix of known prompts paired with human-verified optimal outcomes.</p>
+<p>My golden set is broken down into specific competency tiers:</p>
 <ul>
-<li><a href="#benchmark-environment--hardware-constraints">Benchmark Environment &amp; Hardware Constraints</a></li>
-<li><a href="#methodology-evaluated-architectures">Methodology: Evaluated Architectures</a></li>
-<li><a href="#the-benchmark-wall-clock-retrieval">The Benchmark: Wall-Clock Retrieval</a>
-<ul>
-<li><a href="#analysing-the-results--crucial-caveats">Analysing the Results &amp; Crucial Caveats</a></li>
+<li><strong>Omission Detection:</strong> Can the agent reliably spot when mandatory error handling or logging is missing from a new function?</li>
+<li><strong>Style Alignment:</strong> Does the agent correctly flag deviations from my internal naming conventions without being overly pedantic?</li>
+<li><strong>Security Posture:</strong> Does it successfully identify hardcoded secrets or SQL injection vectors in obfuscated test payloads?</li>
 </ul>
-</li>
-<li><a href="#conclusion-optimal-architecture-selection">Conclusion: Optimal Architecture Selection</a></li>
-</ul>
-<h2>Benchmark Environment &amp; Hardware Constraints</h2>
-<p>To ensure reproducibility and transparency, it is critical to define the constraints of the benchmark environment:</p>
-<ul>
-<li><strong>Hardware:</strong> Apple MacBook M4, 12 cores, 24 GB RAM.</li>
-<li><strong>Storage:</strong> Local NVMe SSD.</li>
-<li><strong>Concurrency Model:</strong> All benchmarks were executed synchronously using standard single-threaded Python scripts inside the <code>pytest-benchmark</code> harness. This strictly isolates the performance overhead of the data access layer (XML parsing, JSON index reading, Arrow column retrieval, or HTTP network requests) without confounding the results with parallelisation strategies or multi-processing frameworks.</li>
-</ul>
-<h2>Methodology: Evaluated Architectures</h2>
-<p>Given the scalability limitations of Global VRTs, it is necessary to evaluate more efficient query paradigms for large COG collections. I benchmarked five alternative architectures against the baseline Global VRT:</p>
-<ol>
-<li><strong>Local VRTs (Dynamic):</strong> Instead of one giant VRT, I use a lightweight spatial index (like GeoParquet) to find intersecting COGs, and dynamically build a tiny, temporary VRT on disk at query time.</li>
-<li><strong>GeoParquet Direct Reads:</strong> Similar to Local VRTs, but I skip the VRT entirely. I find the intersecting COGs using GeoParquet, open them directly with <code>rasterio</code>, and use <code>rasterio.merge</code> to mosaic them in memory.</li>
-<li><strong>Kerchunk (Virtual Zarr):</strong> I extract the byte-offsets of the compressed TIFF chunks and store them in a lightweight JSON index. Clients read this index using <code>fsspec</code>'s <code>ReferenceFileSystem</code> and <code>xarray/zarr</code>, treating the original COGs as a single Zarr array without moving any data.</li>
-<li><strong>Lance Format:</strong> A contemporary columnar format designed for ML and multimodal data. The TIFF data is extracted into <code>FixedSizeListArrays</code> alongside <a href="https://en.wikipedia.org/wiki/Well-known_text_representation_of_geometry">Well-Known Binary (WKB)</a> geometries. Lance facilitates $O(1)$ random access, thereby circumventing the requirement to decompress entire row groups.</li>
-<li><strong>Zarr v3 (Physical):</strong> The source COGs are physically transformed and written into a native, chunked <strong>Zarr v3 Sharded Archive</strong>.</li>
-</ol>
-<h2>The Benchmark: Wall-Clock Retrieval</h2>
-<p>I built a Python harness using <code>pytest-benchmark</code> to test these 6 architectures. The task: retrieve a spatial slice intersecting 4 mock COGs out of a grid.</p>
-<p>Here are the empirical wall-clock results running my Python harness (see Table 1):</p>
-<h3>Table 1: Empirical Scorecard</h3>
-<table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '20px', marginBottom: '20px' }}>
-  <thead>
-    <tr style={{ borderBottom: '2px solid #eaecef' }}>
-      <th style={{ textAlign: 'left', padding: '8px' }}>Architecture (time in μs)</th>
-      <th style={{ textAlign: 'right', padding: '8px' }}>Min</th>
-      <th style={{ textAlign: 'right', padding: '8px' }}>Max</th>
-      <th style={{ textAlign: 'right', padding: '8px' }}>Mean</th>
-      <th style={{ textAlign: 'right', padding: '8px' }}>StdDev</th>
-      <th style={{ textAlign: 'right', padding: '8px' }}>Rounds</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr style={{ borderBottom: '1px solid #eaecef' }}>
-      <td style={{ padding: '8px' }}><strong>Kerchunk</strong></td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>106.17</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>155.54</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>113.67</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>8.35</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>164</td>
-    </tr>
-    <tr style={{ borderBottom: '1px solid #eaecef' }}>
-      <td style={{ padding: '8px' }}><strong>Zarr</strong></td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>222.58</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>622.08</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>247.89</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>40.57</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>97</td>
-    </tr>
-    <tr style={{ borderBottom: '1px solid #eaecef' }}>
-      <td style={{ padding: '8px' }}><strong>Lance</strong></td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>815.33</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>2365.58</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>1162.51</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>348.10</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>60</td>
-    </tr>
-    <tr style={{ borderBottom: '1px solid #eaecef' }}>
-      <td style={{ padding: '8px' }}><strong>Global VRT</strong></td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>2482.92</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>2789.83</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>2579.02</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>53.80</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>121</td>
-    </tr>
-    <tr style={{ borderBottom: '1px solid #eaecef' }}>
-      <td style={{ padding: '8px' }}><strong>GeoParquet Direct</strong></td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>6942.83</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>7975.96</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>7235.86</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>239.71</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>101</td>
-    </tr>
-    <tr>
-      <td style={{ padding: '8px' }}><strong>Local VRT</strong></td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>94853.63</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>96684.63</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>95457.94</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>667.18</td>
-      <td style={{ textAlign: 'right', padding: '8px' }}>7</td>
-    </tr>
-  </tbody>
-</table>
-<h3>Analysing the Results &amp; Crucial Caveats</h3>
-<p>While the table above provides a baseline, there are four critical caveats to this analysis:</p>
-<ol>
-<li><strong>The Scale Disconnect:</strong> The benchmark evaluates a <strong>micro-scale scenario</strong> (a grid of 100 COGs). At this scale, the Global VRT parses in ~2.5ms (see Table 1), which looks acceptable. However, VRT parsing degrades non-linearly; a 2GB XML file for 10 million COGs would cause this number to spike into the seconds or cause an outright crash, whereas Zarr and Lance remain $O(1)$.</li>
-<li><strong>The Network Mirage:</strong> These tests ran on a <strong>local NVMe SSD</strong>. In a real cloud environment (S3), network latency dominates. A VRT or <code>rasterio.merge</code> approach requires multiple sequential HTTP GET requests to read TIFF headers before touching data. Over a network, the gap between Kerchunk/Zarr (a single targeted byte-range request) and VRTs would expand by orders of magnitude.</li>
-<li><strong>The Local VRT Penalty:</strong> Why is Local VRT (~95ms, see Table 1) so much slower than GeoParquet Direct (~7ms, see Table 1) when they both use the same index? The substantial penalty observed here stems from a naive implementation that spawns a <code>gdalbuildvrt</code> subprocess and performs physical disk I/O. While implementing this via native in-memory Python bindings (e.g., <code>rasterio.vrt</code>) would eliminate the subprocess overhead, the fundamental computational cost of dynamically parsing and constructing XML structures at runtime still inherently trails $O(1)$ columnar reads.</li>
-</ol>
-<p>Despite the artificial advantages provided by local hardware, the architectural conclusions remain valid:</p>
-<ul>
-<li><strong>Optimal Architectures (Kerchunk &amp; Zarr):</strong> Both the virtual and physical Zarr implementations circumvent the overhead associated with XML parsing and dynamic mosaicking. They execute targeted retrieval of the precise compressed bytes required.</li>
-<li><strong>Unexpected Performance of Lance:</strong> The $O(1)$ random access capability of the Lance format yields highly competitive latencies (~1.1ms). It matches the performance profile of pure N-dimensional arrays while maintaining the structural flexibility of a tabular format.</li>
-<li><strong>Underperforming Architecture (Local VRT):</strong> The dynamic generation of XML via a naive subprocess and the subsequent physical I/O to a temporary disk file incurs a latency penalty of nearly 100ms. While this approach is memory-safe, the fundamental cost of constructing XML structures is detrimental to response times.</li>
-</ul>
-<h2>Conclusion: Optimal Architecture Selection</h2>
-<p>Following a comprehensive assessment of both empirical performance and operational overhead, a definitive optimal architecture emerges for high-concurrency production environments. Although &quot;virtual&quot; zero-copy references (e.g., Kerchunk or VirtualiZarr) demonstrate exceptional performance in localised benchmarks, they introduce substantial fragility in production systems. Because the virtual index is structurally decoupled from the physical data, any modification, relocation, or overwrite of the underlying source COG causes the hardcoded byte-offsets within the Kerchunk index to point to misaligned or invalid data. Furthermore, virtual references merely translate the metadata bottleneck rather than eliminating it. At the scale of millions of COGs, the resulting JSON or Parquet index becomes a massive dependency, and because the files are not physically consolidated, the architecture remains constrained by the latency overhead of executing millions of distinct S3 object reads.</p>
-<p>Conversely, the most robust and performant architectural strategy is the <strong>physical transformation of the COGs into native Zarr v3 Sharded Archives</strong>. This conversion process can be parallelised to achieve high throughput using libraries such as <code>tensorstore</code> or the Rust-based <code>zarrs</code>.</p>
-<p>Once the data is structured as a native Zarr v3 archive, the requirement for backend Python-based tile servers is entirely eliminated. By hosting the Zarr archive on a static object storage service (e.g., Amazon S3) and coupling a WebAssembly (WASM)-powered Zarr decoder with MapLibre's Custom WebGL layers on the client frontend, the browser can dynamically fetch, decompress, and execute immediate GPU-accelerated client-side rendering.</p>
-<p>This architectural paradigm eradicates the VRT bottleneck, removes the dependency on computationally expensive backend tile servers, and achieves the theoretical minimum latency for interactive web mapping applications.</p>
+<p>When a developer submits a pull request, the automated AI reviewer runs its logic against this golden set. If the system catches the agent degrading—like dropping key entities or failing to spot obvious anti-patterns it previously caught—the CI pipeline rejects the changes. This works because it treats the LLM like an engineer taking a certification exam: I don't care <em>how</em> it arrived at the answer (i.e., the executed code paths), only that the semantic output remains consistently correct across hundreds of known scenarios.</p>
+<h2>What Does the AI Reviewer Actually Do?</h2>
+<p>Before diving into how it is measured, it helps to understand what the automated AI reviewer is. I built an orchestrator that listens for new pull requests across my repositories. When a developer opens a PR, this system fetches the code diffs and feeds them into an LLM. The agent's job is to act as a senior engineer: it scans the changes for architectural anti-patterns, flags security vulnerabilities, checks alignment with internal style guides, and posts actionable feedback directly as PR comments.</p>
+<p>Because the agent is making subjective judgments on complex code, its output isn't a simple pass/fail. It might give great feedback on one PR but hallucinate on another. That's why I need a robust way to constantly assess its core competency.</p>
+<h2>Swapping Coverage for Outcome Verification</h2>
+<p>I am basically comparing two distinct paradigms for keeping a codebase healthy. The old-school approach is static code coverage, which mathematically checks which lines of Python were actually executed during testing. Sure, it stops catastrophic syntax errors, but it's blind to semantic quality.</p>
+<p>The new dynamic AI performance tracking paradigm swaps static coverage for functional outcome verification. The entire process is orchestrated inside a GitHub Actions environment. A pull request triggers the reviewer script, which authenticates via Workload Identity Federation (WIF) and processes the golden assessments. The script outputs an aggregate pass rate percentage—the AI's current reliability score. To make sure everyone can see this metric, the pipeline updates a dynamic SVG badge that sits proudly on the repository's <code>README.md</code>.</p>
+<h2>The Actions Workflow</h2>
+<p>To get this dynamic badging system running, I use a custom GitHub Actions workflow. The pipeline runs the reviewer, scrapes the pass rate, and uses an external badging service (like Shields.io) or a custom Gist to render the metric.</p>
+<p>Here is the GitHub Actions YAML snippet showing how the evaluation runs and the badge gets minted:</p>
+<pre><code class="language-yaml">name: AI Reliability Assessment
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  assess-and-badge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: &quot;latest&quot;
+
+      - name: Run Golden Assessments
+        id: evaluate
+        run: |
+          uv run python orchestrator/evaluate_golden.py &gt; result.txt
+          PASS_RATE=$(cat result.txt)
+          echo &quot;pass_rate=$PASS_RATE&quot; &gt;&gt; $GITHUB_OUTPUT
+
+      - name: Generate Dynamic Badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: 1234567890abcdef1234567890abcdef
+          filename: ai-reliability.json
+          label: AI Assessment
+          message: ${{ steps.evaluate.outputs.pass_rate }}%
+          color: green
+          namedLogo: github
+</code></pre>
+<p>This setup extracts the performance metric and pushes it to a distinct file. The repository's <code>README.md</code> then points directly to the dynamically generated SVG URI, making sure the current reliability score is front and centre for anyone looking at the project:</p>
+<p><img src="https://img.shields.io/badge/AI_Assessment-85%25-green?logo=github" alt="AI Reliability Badge" /></p>
+<p>Because the badging pipeline is decoupled from the specific assessment logic, this architecture easily scales to support multiple performance badges. For example, instead of a single aggregate score, you can generate specific badges for different assessment vectors—such as a &quot;500s Avoidance&quot; badge, a &quot;Context Retrieval Accuracy&quot; badge, or a &quot;Security Posture&quot; badge—providing an immediate, granular dashboard of the agent's current capabilities.</p>
+<h2>Wrapping Up</h2>
+<p>Dynamically measuring and badging performance against a golden set is a highly useful way to track the reliability of non-deterministic systems. It gives you an immediate visual indicator of agent health that acts as a modern alternative to traditional code coverage. By enforcing this check right at the CI layer, engineering teams can make sure performance drops are caught and blocked long before the flawed logic merges into the main branch.</p>
 <h2>References</h2>
-<ol>
-<li><a href="https://gdal.org/">Geospatial Data Abstraction Library (GDAL)</a></li>
-<li><a href="https://www.cogeo.org/">Cloud Optimised GeoTIFF specification</a></li>
-<li><a href="https://stacspec.org/">SpatioTemporal Asset Catalogue (STAC)</a></li>
-<li><a href="https://zarr.dev/">Zarr Storage Format</a></li>
-<li><a href="https://lancedb.github.io/lance/">Lance Format</a></li>
-<li><a href="https://pytest-benchmark.readthedocs.io/">pytest-benchmark</a></li>
-</ol>
+<ul>
+<li>[1] <a href="https://arxiv.org/abs/2107.03374">Evaluating Large Language Models Trained on Code (Chen et al.)</a></li>
+<li>[2] <a href="https://docs.github.com/en/actions">GitHub Actions Documentation</a></li>
+<li>[3] <a href="https://github.com/Schneegans/dynamic-badges-action">Dynamic Badges Action</a></li>
+</ul>
 <hr />
 <p><em>Transparency Note: This blog post was written and structured with the assistance of an AI agent (Gemini).</em></p>
 
