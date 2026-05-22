@@ -22,3 +22,21 @@ When this skill is invoked, you must FIRST gather all necessary context.
 4. **Validate:** Ensure you have enough data to populate a comprehensive "Empirical Scorecard" (metrics, latencies, etc.). If not, warn the user.
 
 **Wait for the user's response before proceeding to Phase 2.**
+
+## Phase 2: The Outline & Approval Gate (HARD STOP)
+
+Once you have the inputs, generate a structured outline that maps exactly to the `BLOG_STYLE.md` structural requirements.
+
+**Outline Structure MUST Include:**
+- Working Title & Tags
+- Draft TL;DR Callout (summarizing core findings)
+- Introduction narrative arc
+- Benchmark Environment & Hardware Constraints
+- Methodology / Evaluated Architectures
+- The Benchmark / Analysis (including Table/Scorecard structure)
+- Conclusion: Optimal Architecture Selection
+
+**<HARD-GATE>**
+You MUST present this outline to the user and ask for their explicit approval.
+Do NOT write a single paragraph of the draft until the user says "yes" or provides tweaks.
+**</HARD-GATE>**
