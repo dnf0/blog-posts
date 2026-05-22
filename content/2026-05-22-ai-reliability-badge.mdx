@@ -13,7 +13,14 @@ description: "How to dynamically track and expose automated AI reviewer performa
 
 The shift from deterministic procedural code to probabilistic AI necessitates a fundamental change in how we think about continuous integration. Historically, test suites relied on absolute binary assertions: a method either returned the correct string, or the test failed. But when you're dealing with LLMs and automated AI reviewer systems, responses are inherently non-deterministic. Trying to evaluate these systems by looking at traditional static code coverage metrics gives you a false sense of security that completely misses the actual quality of the output [1]. It tells you that the LLM API was called, not that the response was accurate or useful.
 
-To address this, we've moved away from standard coverage percentage metrics in favour of evaluating the agent against a curated set of "golden assessments". Think of these as a rigorous matrix of known prompts paired with human-verified optimal outcomes. When a developer submits a pull request, the automated AI reviewer runs its logic against this golden set. If the system catches the agent dropping key entities or failing to spot obvious anti-patterns, the CI pipeline rejects the changes.
+To address this, we've moved away from standard coverage percentage metrics in favour of evaluating the agent against a curated set of "golden assessments". Think of these as a rigorous matrix of known prompts paired with human-verified optimal outcomes. 
+
+Our golden set is broken down into specific competency tiers:
+- **Omission Detection:** Can the agent reliably spot when mandatory error handling or logging is missing from a new function?
+- **Style Alignment:** Does the agent correctly flag deviations from our internal naming conventions without being overly pedantic?
+- **Security Posture:** Does it successfully identify hardcoded secrets or SQL injection vectors in obfuscated test payloads?
+
+When a developer submits a pull request, the automated AI reviewer runs its logic against this golden set. If the system catches the agent degrading—like dropping key entities or failing to spot obvious anti-patterns it previously caught—the CI pipeline rejects the changes. This works because it treats the LLM like an engineer taking a certification exam: we don't care *how* it arrived at the answer (i.e., the executed code paths), only that the semantic output remains consistently correct across hundreds of known scenarios.
 
 ## What Does the AI Reviewer Actually Do?
 
