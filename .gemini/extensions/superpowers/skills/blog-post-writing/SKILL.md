@@ -14,27 +14,29 @@ You are an expert technical writer and editor. Your goal is to guide the user th
 When this skill is invoked, you must FIRST gather all necessary context.
 
 1. **Load Guidelines:** Explicitly read `BLOG_STYLE.md` from the repository to understand the rules.
-2. **Load Reference:** Explicitly read at least one recent `.mdx` file from the `content/` directory to understand the layout in practice (e.g., `content/2026-05-12-why-vrts-fail.mdx`).
+2. **Load Reference:** Explicitly read at least one recent `.mdx` file from the `content/` directory to understand the layout in practice.
 3. **Ask the User:** Prompt the user for:
    - The primary topic/goal.
+   - The desired Post Type (Analytical or Conversational).
    - Any raw data, benchmark outputs, or notes.
    - The key architectural takeaways.
-4. **Validate:** Ensure you have enough data to populate a comprehensive "Empirical Scorecard" (metrics, latencies, etc.). If not, warn the user.
+4. **Validate:** If the post is Analytical, ensure you have enough data to populate a comprehensive "Empirical Scorecard". If not, warn the user.
 
 **Wait for the user's response before proceeding to Phase 2.**
 
 ## Phase 2: The Outline & Approval Gate (HARD STOP)
 
-Once you have the inputs, generate a structured outline that maps exactly to the `BLOG_STYLE.md` structural requirements.
+Once you have the inputs, generate a structured outline that maps exactly to the `BLOG_STYLE.md` structural requirements for the chosen Post Type.
 
 **Outline Structure MUST Include:**
 - Working Title & Tags
 - Draft TL;DR Callout (summarizing core findings)
 - Introduction narrative arc
-- Benchmark Environment & Hardware Constraints
-- Methodology / Evaluated Architectures
-- The Benchmark / Analysis (including Table/Scorecard structure)
-- Conclusion: Optimal Architecture Selection
+- [If Analytical] Benchmark Environment & Hardware Constraints
+- [If Analytical] Methodology / Evaluated Architectures
+- [If Analytical] The Benchmark / Analysis (including Table/Scorecard structure)
+- [If Conversational] Custom/Flexible Headings outlining the narrative
+- Conclusion
 
 **<HARD-GATE>**
 You MUST present this outline to the user and ask for their explicit approval.
@@ -50,10 +52,10 @@ Apply the Frontmatter, British English spelling, and specific styling required b
 After writing the draft, you MUST audit your own work. Do not ask the user to do this. Fix any violations you find.
 
 Checklist:
-1. **Metric Anchoring:** Does every metric (e.g., latency, size) explicitly point to a table/figure (e.g., `(see Table X)`)?
-2. **Acronyms:** Are they defined on first use? (e.g., Virtual Raster (VRT)).
+1. **Metric Anchoring:** [Analytical Only] Does every metric explicitly point to a table/figure (e.g., `(see Table X)`)?
+2. **Acronyms:** Are niche domain acronyms defined on first use? (Ensure common acronyms like AI, API are NOT defined).
 3. **Paragraph Flow:** Are there any single-sentence paragraphs? (Merge them).
-4. **Tone:** Is the tone rigorous and objective? (Remove hyperbole like "blistering").
+4. **Tone:** Does it match the selected type (Rigorous for Analytical, Engaging/Lighter for Conversational) without using hyperbole?
 5. **Links:** Are all links active? (Use tools to check HTTP 200 responses).
 6. **British English:** Ensure words like `optimised`, `modelling`, `centre` are used.
 

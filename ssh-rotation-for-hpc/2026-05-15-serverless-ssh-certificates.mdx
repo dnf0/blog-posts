@@ -28,7 +28,7 @@ The organisational requirement was clear: all access must be authenticated via o
 
 ## The Concept: OpenSSH Certificates
 
-The solution to bridging SSO with native SSH lies in a feature that has been built into the protocol for years: [OpenSSH Certificates](https://www.openbsd.org/papers/bsdcan-sign.html) [1]. 
+The solution to bridging SSO with native SSH lies in a feature that has been built into the protocol for years: [OpenSSH Certificates](https://www.bsdcan.org/2018/schedule/attachments/465_SSH_Key_Management.pdf) [1]. 
 
 To understand certificates, think of how a traditional office building works. Under the old "public key" model, every single door lock in the building must be manually programmed with a list of every employee's unique house key. If you hire someone, you update every lock. If you fire someone, you update every lock. 
 
@@ -81,7 +81,7 @@ By adopting OpenSSH certificates and wrapping the issuance process in a serverle
 Most importantly, this security enhancement did not degrade the developer experience. Because the system outputs standard SSH certificates, engineers continue to use Cursor, VS Code, and terminal tools like `tmux` (which keep long-running jobs alive even if a laptop disconnects) without any friction. In practice, treating infrastructure access as a dynamic, verifiable event rather than a static configuration state provides a robust foundation for secure, scalable remote development.
 
 ## References
-- [1] [OpenSSH Certificates](https://www.openbsd.org/papers/bsdcan-sign.html)
+- [1] [OpenSSH Certificates](https://www.bsdcan.org/2018/schedule/attachments/465_SSH_Key_Management.pdf)
 - [2] [AWS Systems Manager Parameter Store](https://aws.amazon.com/systems-manager/features/#Parameter_Store)
 - [3] [AWS Secrets Manager Documentation](https://aws.amazon.com/secrets-manager/)
 
